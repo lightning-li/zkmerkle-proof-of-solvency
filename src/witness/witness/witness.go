@@ -153,8 +153,10 @@ func (w *Witness) Run() {
 
 		copy(batchCreateUserWit.BeforeCexAssets[:], w.cexAssets[:])
 		for j := 0; j < len(w.cexAssets); j++ {
-			commitment := utils.ConvertAssetInfoToBytes(w.cexAssets[j])
-			poseidonHasher.Write(commitment)
+			commitments := utils.ConvertAssetInfoToBytes(w.cexAssets[j])
+			for p := 0; p < len(commitments); p++ {
+				poseidonHasher.Write(commitments[p])
+			}
 		}
 		batchCreateUserWit.BeforeCEXAssetsCommitment = poseidonHasher.Sum(nil)
 		poseidonHasher.Reset()
@@ -163,8 +165,10 @@ func (w *Witness) Run() {
 			w.ExecuteBatchCreateUser(uint32(j), uint32(i), batchCreateUserWit)
 		}
 		for j := 0; j < len(w.cexAssets); j++ {
-			commitment := utils.ConvertAssetInfoToBytes(w.cexAssets[j])
-			poseidonHasher.Write(commitment)
+			commitments := utils.ConvertAssetInfoToBytes(w.cexAssets[j])
+			for p := 0; p < len(commitments); p++ {
+				poseidonHasher.Write(commitments[p])
+			}
 		}
 		batchCreateUserWit.AfterCEXAssetsCommitment = poseidonHasher.Sum(nil)
 		poseidonHasher.Reset()
@@ -248,6 +252,9 @@ func (w *Witness) ExecuteBatchCreateUser(accountIndex uint32, currentNumber uint
 		// update cexAssetInfo
 		w.cexAssets[account.Assets[p].Index].TotalEquity = utils.SafeAdd(w.cexAssets[account.Assets[p].Index].TotalEquity, account.Assets[p].Equity)
 		w.cexAssets[account.Assets[p].Index].TotalDebt = utils.SafeAdd(w.cexAssets[account.Assets[p].Index].TotalDebt, account.Assets[p].Debt)
+		w.cexAssets[account.Assets[p].Index].VipLoanCollateral = utils.SafeAdd(w.cexAssets[account.Assets[p].Index].VipLoanCollateral, account.Assets[p].VipLoan)
+		w.cexAssets[account.Assets[p].Index].MarginCollateral = utils.SafeAdd(w.cexAssets[account.Assets[p].Index].MarginCollateral, account.Assets[p].Margin)
+		w.cexAssets[account.Assets[p].Index].PortfolioMarginCollateral = utils.SafeAdd(w.cexAssets[account.Assets[p].Index].PortfolioMarginCollateral, account.Assets[p].PortfolioMargin)
 	}
 	// update account tree
 	accountHash := <-w.accountHashChan[index]

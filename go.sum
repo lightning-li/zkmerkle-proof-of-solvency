@@ -426,8 +426,8 @@ github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6r
 github.com/bkaradzic/go-lz4 v1.0.0/go.mod h1:0YdlkowM3VswSROI7qDxhRvJ3sLhlFrRRwjwegp5jy4=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
 github.com/blang/semver/v4 v4.0.0/go.mod h1:IbckMUScFkM3pff0VJDNKRiT6TG/YpiHIM2yvyW5YoQ=
-github.com/bnb-chain/gnark v0.7.2-0.20231008065852-bf4926770621 h1:axDn2UR/evNksueBbom7/TNGyDb3q/blvKJ1J1FaIZI=
-github.com/bnb-chain/gnark v0.7.2-0.20231008065852-bf4926770621/go.mod h1:fmHUzzss1n32K3COWMvrQj7uo7GjIeIr1wXzjj5gmj8=
+github.com/bnb-chain/gnark v0.7.2-0.20240718144551-11e997d7e914 h1:FOsP3kDmcC4aEogCYBm3lc7Os7E1etyj19wMLZFBz+U=
+github.com/bnb-chain/gnark v0.7.2-0.20240718144551-11e997d7e914/go.mod h1:fmHUzzss1n32K3COWMvrQj7uo7GjIeIr1wXzjj5gmj8=
 github.com/bnb-chain/gnark-crypto v0.8.1-0.20230412133626-30223a679fb7 h1:ME5Nif4WgGgWKH2omB6ybic5bsU22bHy43xBsgMBHgM=
 github.com/bnb-chain/gnark-crypto v0.8.1-0.20230412133626-30223a679fb7/go.mod h1:a2DQL4+5ywF6safEeZFEPGRiiGbjzGFRUN2sg06VuU4=
 github.com/bnb-chain/zkbnb-smt v0.0.3-0.20221227064653-7422bfd51aa0 h1:ctmwkpucisve1QBpCIgAH9hjYZGxbtyaCSh5yVM+F1s=
