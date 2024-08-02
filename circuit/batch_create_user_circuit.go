@@ -3,6 +3,7 @@ package circuit
 import (
 	"github.com/binance/zkmerkle-proof-of-solvency/src/utils"
 	"github.com/consensys/gnark/std/hash/poseidon"
+	"github.com/consensys/gnark/std/rangecheck"
 )
 
 type BatchCreateUserCircuit struct {
@@ -70,19 +71,20 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 	cexAssets := make([]Variable, len(b.BeforeCexAssets) * countOfCexAsset)
 	afterCexAssets := make([]CexAssetInfo, len(b.BeforeCexAssets))
 
+	r := rangecheck.New(api)
 	// verify whether beforeCexAssetsCommitment is computed correctly
 	for i := 0; i < len(b.BeforeCexAssets); i++ {
-		CheckValueInRange(api, b.BeforeCexAssets[i].TotalEquity)
-		CheckValueInRange(api, b.BeforeCexAssets[i].TotalDebt)
-		CheckValueInRange(api, b.BeforeCexAssets[i].BasePrice)
-		CheckValueInRange(api, b.BeforeCexAssets[i].VipLoanCollateral)
-		CheckValueInRange(api, b.BeforeCexAssets[i].MarginCollateral)
-		CheckValueInRange(api, b.BeforeCexAssets[i].PortfolioMarginCollateral)
+		r.Check(b.BeforeCexAssets[i].TotalEquity, 64)
+		r.Check(b.BeforeCexAssets[i].TotalDebt, 64)
+		r.Check(b.BeforeCexAssets[i].BasePrice, 64)
+		r.Check(b.BeforeCexAssets[i].VipLoanCollateral, 64)
+		r.Check(b.BeforeCexAssets[i].MarginCollateral, 64)
+		r.Check(b.BeforeCexAssets[i].PortfolioMarginCollateral, 64)
 		
 		FillCexAssetCommitment(api, b.BeforeCexAssets[i], i, cexAssets)
-		// GenerateRapidArithmeticForCollateral(api, b.BeforeCexAssets[i].VipLoanRatios)
-		// GenerateRapidArithmeticForCollateral(api, b.BeforeCexAssets[i].MarginRatios)
-		// GenerateRapidArithmeticForCollateral(api, b.BeforeCexAssets[i].PortfolioMarginRatios)
+		GenerateRapidArithmeticForCollateral(api, r, b.BeforeCexAssets[i].VipLoanRatios)
+		GenerateRapidArithmeticForCollateral(api, r, b.BeforeCexAssets[i].MarginRatios)
+		GenerateRapidArithmeticForCollateral(api, r, b.BeforeCexAssets[i].PortfolioMarginRatios)
 		afterCexAssets[i] = b.BeforeCexAssets[i]
 	}
 	actualCexAssetsCommitment := poseidon.Poseidon(api, cexAssets...)
@@ -91,6 +93,8 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 	api.AssertIsEqual(b.BeforeAccountTreeRoot, b.CreateUserOps[0].BeforeAccountTreeRoot)
 	api.AssertIsEqual(b.AfterAccountTreeRoot, b.CreateUserOps[len(b.CreateUserOps)-1].AfterAccountTreeRoot)
 
+	t := ConstructTierRatiosLookupTable(api, b.BeforeCexAssets)
+
 	for i := 0; i < len(b.CreateUserOps); i++ {
 		accountIndexHelper := AccountIdToMerkleHelper(api, b.CreateUserOps[i].AccountIndex)
 		VerifyMerkleProof(api, b.CreateUserOps[i].BeforeAccountTreeRoot, EmptyAccountLeafNodeHash, b.CreateUserOps[i].AccountProof[:], accountIndexHelper)
@@ -98,22 +102,25 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 		var totalUserDebt Variable = 0
 		userAssets := b.CreateUserOps[i].Assets
 		var totalUserCollateralRealValue Variable = 0
+		
 		for j := 0; j < len(userAssets); j++ {
-			CheckValueInRange(api, userAssets[j].Debt)
-			CheckValueInRange(api, userAssets[j].Equity)
-			CheckValueInRange(api, userAssets[j].VipLoanCollateral)
-			CheckValueInRange(api, userAssets[j].MarginCollateral)
-			CheckValueInRange(api, userAssets[j].PortfolioMarginCollateral)
+			r.Check(userAssets[j].Debt, 64)
+			r.Check(userAssets[j].Equity, 64)
+			r.Check(userAssets[j].VipLoanCollateral, 64)
+			r.Check(userAssets[j].MarginCollateral, 64)
+			r.Check(userAssets[j].PortfolioMarginCollateral, 64)
 			
 			assetTotalCollateral := api.Add(userAssets[j].VipLoanCollateral, userAssets[j].MarginCollateral, userAssets[j].PortfolioMarginCollateral)
-			api.AssertIsLessOrEqual(assetTotalCollateral, userAssets[j].Equity)
-
-			vipLoanRealValue := ComputeCollateral(api, api.Mul(userAssets[j].VipLoanCollateral, b.BeforeCexAssets[j].BasePrice), b.BeforeCexAssets[j].VipLoanRatios)
-			marginRealValue := ComputeCollateral(api, api.Mul(userAssets[j].MarginCollateral, b.BeforeCexAssets[j].BasePrice), b.BeforeCexAssets[j].MarginRatios)
-			portfolioMarginRealValue := ComputeCollateral(api, api.Mul(userAssets[j].PortfolioMarginCollateral, b.BeforeCexAssets[j].BasePrice), b.BeforeCexAssets[j].PortfolioMarginRatios)
-			// vipLoanRealValue := userAssets[j].VipLoanCollateral
-			// marginRealValue := userAssets[j].MarginCollateral
-			// portfolioMarginRealValue := userAssets[j].PortfolioMarginCollateral
+			r.Check(assetTotalCollateral, 64)
+			api.AssertIsLessOrEqualNOp(assetTotalCollateral, userAssets[j].Equity, 64, true)
+			
+			collateralValues := GetAndCheckTierRatiosQueryResults(api, r, t, j, userAssets[j], b.BeforeCexAssets[j].BasePrice, 
+											3*(len(b.BeforeCexAssets[j].VipLoanRatios)+1), 
+											3*(len(b.BeforeCexAssets[j].MarginRatios)+1),
+											3*(len(b.BeforeCexAssets[j].PortfolioMarginRatios)+1))
+			vipLoanRealValue := collateralValues[0]
+			marginRealValue := collateralValues[1]
+			portfolioMarginRealValue := collateralValues[2]
 
 			totalUserCollateralRealValue = api.Add(totalUserCollateralRealValue, vipLoanRealValue, marginRealValue, portfolioMarginRealValue)
 			
@@ -127,7 +134,7 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 			afterCexAssets[j].PortfolioMarginCollateral = api.Add(afterCexAssets[j].PortfolioMarginCollateral, userAssets[j].PortfolioMarginCollateral)
 		}
 		// make sure user's total Debt is less or equal than total collateral
-		api.AssertIsLessOrEqual(totalUserDebt, totalUserCollateralRealValue)
+		api.AssertIsLessOrEqualNOp(totalUserDebt, totalUserCollateralRealValue, 128)
 
 		userAssetsCommitment := ComputeUserAssetsCommitment(api, userAssets)
 		accountHash := poseidon.Poseidon(api, b.CreateUserOps[i].AccountIdHash, totalUserEquity, totalUserDebt, userAssetsCommitment)
@@ -138,11 +145,11 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 
 	tempAfterCexAssets := make([]Variable, len(b.BeforeCexAssets) * countOfCexAsset)
 	for j := 0; j < len(b.BeforeCexAssets); j++ {
-		CheckValueInRange(api, afterCexAssets[j].TotalEquity)
-		CheckValueInRange(api, afterCexAssets[j].TotalDebt)
-		CheckValueInRange(api, afterCexAssets[j].VipLoanCollateral)
-		CheckValueInRange(api, afterCexAssets[j].MarginCollateral)
-		CheckValueInRange(api, afterCexAssets[j].PortfolioMarginCollateral)
+		r.Check(afterCexAssets[j].TotalEquity, 64)
+		r.Check(afterCexAssets[j].TotalDebt, 64)
+		r.Check(afterCexAssets[j].VipLoanCollateral, 64)
+		r.Check(afterCexAssets[j].MarginCollateral, 64)
+		r.Check(afterCexAssets[j].PortfolioMarginCollateral, 64)
 
 		FillCexAssetCommitment(api, afterCexAssets[j], j, tempAfterCexAssets)
 	}

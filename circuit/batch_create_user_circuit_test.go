@@ -12,7 +12,7 @@ import (
 
 
 func TestBatchCreateUserCircuit(t *testing.T) {
-	userCircuit := NewBatchCreateUserCircuit(350, 2)
+	userCircuit := NewBatchCreateUserCircuit(320, 2)
 	oR1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, userCircuit, frontend.IgnoreUnconstrainedInputs())
 	if err != nil {
 		t.Fatal(err)

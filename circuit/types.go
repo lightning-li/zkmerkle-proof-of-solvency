@@ -34,9 +34,20 @@ type CexAssetInfo struct {
 type UserAssetInfo struct {
 	Equity Variable
 	Debt   Variable
+
 	VipLoanCollateral     		Variable
+	// The index means the position of tier ratios where the boundary value is larger than the collateral.
+	VipLoanCollateralIndex	 	Variable
+	// If the flag is 1, the boundary value of last tier ratio is less than the collateral.
+	VipLoanCollateralFlag	 	Variable
+
 	MarginCollateral      		Variable
+	MarginCollateralIndex	 	Variable
+	MarginCollateralFlag	 	Variable
+
 	PortfolioMarginCollateral   Variable
+	PortfolioMarginCollateralIndex Variable
+	PortfolioMarginCollateralFlag Variable
 }
 
 type CreateUserOperation struct {
