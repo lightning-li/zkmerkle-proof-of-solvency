@@ -129,7 +129,7 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 	userAssetIdHashes := make([]Variable, len(b.CreateUserOps)+1)
 	
 	userAssetsResults := make([][]Variable, len(b.CreateUserOps))
-	userAssetsQueries := make([][]Variable, len(b.CreateUserOps[0].Assets)*5)
+	userAssetsQueries := make([][]Variable, len(b.CreateUserOps))
 
 	for i := 0; i < len(b.CreateUserOps); i++ {
 		accountIndexHelper := AccountIdToMerkleHelper(api, b.CreateUserOps[i].AccountIndex)
