@@ -43,7 +43,11 @@ func main() {
 	fmt.Println("account tree init height is ", accountTree.LatestVersion())
 	fmt.Printf("account tree root is %x\n", accountTree.Root())
 
-	witnessService := witness.NewWitness(accountTree, uint32(len(accounts)), accounts, cexAssetsInfo, witnessConfig)
+	totalAccountNum := 0
+	for _, v := range accounts {
+		totalAccountNum += len(v)
+	}
+	witnessService := witness.NewWitness(accountTree, uint32(totalAccountNum), accounts, cexAssetsInfo, assets2UserCounts, witnessConfig)
 	witnessService.Run()
 	fmt.Println("witness service run finished...")
 }

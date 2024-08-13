@@ -1,12 +1,14 @@
 package utils
 
 import (
-	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"math/big"
+	"sort"
+
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 )
 
 const (
-	BatchCreateUserOpsCounts = 864
+	// BatchCreateUserOpsCounts = 864
 	AccountTreeDepth         = 28
 	AssetCounts              = 350
 	// TierCount: must be even number, the cex assets commitment will depend on the TierCount/2 parts
@@ -23,11 +25,13 @@ var (
 	Uint64MaxValueBigInt, _       = new(big.Int).SetString("18446744073709551616", 10)
 	Uint64MaxValueBigIntSquare, _ = new(big.Int).SetString("340282366920938463463374607431768211456", 10)
 	Uint8MaxValueBigInt, _        = new(big.Int).SetString("256", 10)
+	Uint16MaxValueBigInt, _       = new(big.Int).SetString("65536", 10)
 	Uint126MaxValueBigInt, _      = new(big.Int).SetString("85070591730234615865843651857942052864", 10)
 	Uint134MaxValueBigInt, _      = new(big.Int).SetString("21778071482940061661655974875633165533184", 10)
 	Uint64MaxValueFr              = new(fr.Element).SetBigInt(Uint64MaxValueBigInt)
 	Uint64MaxValueFrSquare        = new(fr.Element).SetBigInt(Uint64MaxValueBigIntSquare)
 	Uint8MaxValueFr               = new(fr.Element).SetBigInt(Uint8MaxValueBigInt)
+	Uint16MaxValueFr 			  = new(fr.Element).SetBigInt(Uint16MaxValueBigInt)
 	Uint126MaxValueFr             = new(fr.Element).SetBigInt(Uint126MaxValueBigInt)
 	Uint134MaxValueFr             = new(fr.Element).SetBigInt(Uint134MaxValueBigInt)
 	MaxTierBoundaryValueFr		  = new(fr.Element).SetBigInt(MaxTierBoundaryValue)
@@ -45,4 +49,28 @@ var (
 		"DOGE":  true,
         "PEPE":  true,
 	}
+	// the key is the number of assets user own
+	// the value is the number of batch create user ops
+	BatchCreateUserOpsCountsTiers = map[int]int {
+		// 350: 128,
+		// 50: 620,
+		350: 1,
+		50: 1,
+	}
+	AssetCountsTiers = make([]int, 0)
+
+	// one Fr element is 252 bits, it contains 16 16-bit elements at most
+	PowersOfSixteenBits           [15]fr.Element
 )
+
+func init() {
+	initValue := new(big.Int).SetUint64(1)
+	for i := 0; i < 15; i++ {
+		PowersOfSixteenBits[i].SetBigInt(initValue)
+		initValue.Mul(initValue, big.NewInt(65536))
+	}
+	for k := range BatchCreateUserOpsCountsTiers {
+		AssetCountsTiers = append(AssetCountsTiers, k)
+	}
+	sort.Ints(AssetCountsTiers)
+}

@@ -1,8 +1,11 @@
 package circuit
 
 import (
+
 	"github.com/binance/zkmerkle-proof-of-solvency/src/utils"
 	"github.com/consensys/gnark/std/hash/poseidon"
+
+	"github.com/consensys/gnark/std/lookup/logderivlookup"
 	"github.com/consensys/gnark/std/rangecheck"
 )
 
@@ -22,15 +25,15 @@ func NewVerifyBatchCreateUserCircuit(commitment []byte) *BatchCreateUserCircuit 
 	return &v
 }
 
-func NewBatchCreateUserCircuit(assetCounts uint32, batchCounts uint32) *BatchCreateUserCircuit {
+func NewBatchCreateUserCircuit(userAssetCounts uint32, allAssetCounts uint32, batchCounts uint32) *BatchCreateUserCircuit {
 	var circuit BatchCreateUserCircuit
 	circuit.BatchCommitment = 0
 	circuit.BeforeAccountTreeRoot = 0
 	circuit.AfterAccountTreeRoot = 0
 	circuit.BeforeCEXAssetsCommitment = 0
 	circuit.AfterCEXAssetsCommitment = 0
-	circuit.BeforeCexAssets = make([]CexAssetInfo, assetCounts)
-	for i := uint32(0); i < assetCounts; i++ {
+	circuit.BeforeCexAssets = make([]CexAssetInfo, allAssetCounts)
+	for i := uint32(0); i < allAssetCounts; i++ {
 		circuit.BeforeCexAssets[i] = CexAssetInfo{
 			TotalEquity: 0,
 			TotalDebt:   0,
@@ -42,22 +45,52 @@ func NewBatchCreateUserCircuit(assetCounts uint32, batchCounts uint32) *BatchCre
 			MarginRatios: make([]TierRatio, utils.TierCount),
 			PortfolioMarginRatios: make([]TierRatio, utils.TierCount),
 		}
+		for j := uint32(0); j < utils.TierCount; j++ {
+			circuit.BeforeCexAssets[i].VipLoanRatios[j] = TierRatio{
+				BoundaryValue: 0,
+				Ratio:         0,
+				PrecomputedValue: 0,
+			}
+			circuit.BeforeCexAssets[i].MarginRatios[j] = TierRatio{
+				BoundaryValue: 0,
+				Ratio:         0,
+				PrecomputedValue: 0,
+			}
+			circuit.BeforeCexAssets[i].PortfolioMarginRatios[j] = TierRatio{
+				BoundaryValue: 0,
+				Ratio:         0,
+				PrecomputedValue: 0,
+			}
+		}
 	}
 	circuit.CreateUserOps = make([]CreateUserOperation, batchCounts)
 	for i := uint32(0); i < batchCounts; i++ {
 		circuit.CreateUserOps[i] = CreateUserOperation{
 			BeforeAccountTreeRoot: 0,
 			AfterAccountTreeRoot:  0,
-			Assets:                make([]UserAssetInfo, assetCounts),
+			Assets:                make([]UserAssetInfo, userAssetCounts),
+			AssetsForUpdateCex:    make([]UserAssetMeta, allAssetCounts),
 			AccountIndex:          0,
+			AccountIdHash: 	       0,
 			AccountProof:          [utils.AccountTreeDepth]Variable{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		}
-		for j := uint32(0); j < assetCounts; j++ {
-			circuit.CreateUserOps[i].Assets[j].Debt = 0
-			circuit.CreateUserOps[i].Assets[j].Equity = 0
-			circuit.CreateUserOps[i].Assets[j].VipLoanCollateral = 0
-			circuit.CreateUserOps[i].Assets[j].MarginCollateral = 0
-			circuit.CreateUserOps[i].Assets[j].PortfolioMarginCollateral = 0
+		for j := uint32(0); j < allAssetCounts; j++ {
+			circuit.CreateUserOps[i].AssetsForUpdateCex[j].Debt = 0
+			circuit.CreateUserOps[i].AssetsForUpdateCex[j].Equity = 0
+			circuit.CreateUserOps[i].AssetsForUpdateCex[j].VipLoanCollateral = 0
+			circuit.CreateUserOps[i].AssetsForUpdateCex[j].MarginCollateral = 0
+			circuit.CreateUserOps[i].AssetsForUpdateCex[j].PortfolioMarginCollateral = 0
+		}
+		for j := uint32(0); j < userAssetCounts; j++ {
+			circuit.CreateUserOps[i].Assets[j] = UserAssetInfo{
+				AssetIndex: j,
+				VipLoanCollateralIndex: 0,
+				VipLoanCollateralFlag: 0,
+				MarginCollateralIndex: 0,
+				MarginCollateralFlag: 0,
+				PortfolioMarginCollateralIndex: 0,
+				PortfolioMarginCollateralFlag: 0,
+			}
 		}
 	}
 	return &circuit
@@ -88,12 +121,15 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 		afterCexAssets[i] = b.BeforeCexAssets[i]
 	}
 	actualCexAssetsCommitment := poseidon.Poseidon(api, cexAssets...)
-	api.AssertIsEqual(b.BeforeCEXAssetsCommitment, actualCexAssetsCommitment)
-
+	api.AssertIsEqual(b.BeforeCEXAssetsCommitment, actualCexAssetsCommitment)	
 	api.AssertIsEqual(b.BeforeAccountTreeRoot, b.CreateUserOps[0].BeforeAccountTreeRoot)
 	api.AssertIsEqual(b.AfterAccountTreeRoot, b.CreateUserOps[len(b.CreateUserOps)-1].AfterAccountTreeRoot)
 
 	t := ConstructTierRatiosLookupTable(api, b.BeforeCexAssets)
+	userAssetIdHashes := make([]Variable, len(b.CreateUserOps)+1)
+	
+	userAssetsResults := make([][]Variable, len(b.CreateUserOps))
+	userAssetsQueries := make([][]Variable, len(b.CreateUserOps[0].Assets)*5)
 
 	for i := 0; i < len(b.CreateUserOps); i++ {
 		accountIndexHelper := AccountIdToMerkleHelper(api, b.CreateUserOps[i].AccountIndex)
@@ -102,19 +138,71 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 		var totalUserDebt Variable = 0
 		userAssets := b.CreateUserOps[i].Assets
 		var totalUserCollateralRealValue Variable = 0
+
+		// construct lookup table for user assets
+		userAssetsLookupTable := logderivlookup.New(api)
+		for j := 0; j < len(b.CreateUserOps[i].AssetsForUpdateCex); j++ {
+			userAssetsLookupTable.Insert(b.CreateUserOps[i].AssetsForUpdateCex[j].Equity)
+			userAssetsLookupTable.Insert(b.CreateUserOps[i].AssetsForUpdateCex[j].Debt)
+			userAssetsLookupTable.Insert(b.CreateUserOps[i].AssetsForUpdateCex[j].VipLoanCollateral)
+			userAssetsLookupTable.Insert(b.CreateUserOps[i].AssetsForUpdateCex[j].MarginCollateral)
+			userAssetsLookupTable.Insert(b.CreateUserOps[i].AssetsForUpdateCex[j].PortfolioMarginCollateral)
+		}
+
+		// check the user assetIndex is increasing
+		for j := 0; j < len(userAssets)-1; j++ {
+			r.Check(userAssets[j].AssetIndex, 16)
+			cr := api.CmpNOp(userAssets[j+1].AssetIndex, userAssets[j].AssetIndex, 16, true)
+			api.AssertIsEqual(cr, 1)
+		}
+
+		// one Variable can store 15 assetIds, one assetId is less than 16 bits
+		assetIdsToVariables := make([]Variable, (len(userAssets) + 14) / 15)
+		for j := 0; j < len(assetIdsToVariables); j++ {
+			var v Variable = 0
+			for p := j * 15; p < (j+1)*15 && p < len(userAssets); p++ {
+				v = api.Add(v, api.Mul(userAssets[p].AssetIndex, utils.PowersOfSixteenBits[p%15]))
+			}
+			assetIdsToVariables[j] = v
+		}
+		userAssetIdHashes[i] = poseidon.Poseidon(api, assetIdsToVariables...)
+
+		// construct query to get user assets
+		userAssetsQueries[i] = make([]Variable, len(userAssets)*5)
+		for j := 0; j < len(userAssets); j++ {
+			p := api.Mul(userAssets[j].AssetIndex, 5)
+			for k := 0; k < 5; k++ {
+				userAssetsQueries[i][j*5+k] = api.Add(p, k)
+			}
+		}
+		userAssetsResults[i] = userAssetsLookupTable.Lookup(userAssetsQueries[i]...)
 		
 		for j := 0; j < len(userAssets); j++ {
-			r.Check(userAssets[j].Debt, 64)
-			r.Check(userAssets[j].Equity, 64)
-			r.Check(userAssets[j].VipLoanCollateral, 64)
-			r.Check(userAssets[j].MarginCollateral, 64)
-			r.Check(userAssets[j].PortfolioMarginCollateral, 64)
+			// Equity
+			userEquity := userAssetsResults[i][j*5]
+			r.Check(userEquity, 64)
+			// Debt
+			userDebt := userAssetsResults[i][j*5+1]
+			r.Check(userDebt, 64)
+			// VipLoanCollateral
+			userVipLoanCollateral := userAssetsResults[i][j*5+2]
+			r.Check(userVipLoanCollateral, 64)
+			// MarginCollateral
+			userMarginCollateral := userAssetsResults[i][j*5+3]
+			r.Check(userMarginCollateral, 64)
+			// PortfolioMarginCollateral
+			userPortfolioMarginCollateral := userAssetsResults[i][j*5+4]
+			r.Check(userPortfolioMarginCollateral, 64)
 			
-			assetTotalCollateral := api.Add(userAssets[j].VipLoanCollateral, userAssets[j].MarginCollateral, userAssets[j].PortfolioMarginCollateral)
+			assetTotalCollateral := api.Add(userVipLoanCollateral, userMarginCollateral, userPortfolioMarginCollateral)
 			r.Check(assetTotalCollateral, 64)
-			api.AssertIsLessOrEqualNOp(assetTotalCollateral, userAssets[j].Equity, 64, true)
+			api.AssertIsLessOrEqualNOp(assetTotalCollateral, userEquity, 64, true)
 			
-			collateralValues := GetAndCheckTierRatiosQueryResults(api, r, t, j, userAssets[j], b.BeforeCexAssets[j].BasePrice, 
+			collateralValues := GetAndCheckTierRatiosQueryResults(api, r, t, userAssets[j],
+											userVipLoanCollateral,
+											userMarginCollateral,
+											userPortfolioMarginCollateral,
+											b.BeforeCexAssets[j].BasePrice, 
 											3*(len(b.BeforeCexAssets[j].VipLoanRatios)+1), 
 											3*(len(b.BeforeCexAssets[j].MarginRatios)+1),
 											3*(len(b.BeforeCexAssets[j].PortfolioMarginRatios)+1))
@@ -124,25 +212,62 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 
 			totalUserCollateralRealValue = api.Add(totalUserCollateralRealValue, vipLoanRealValue, marginRealValue, portfolioMarginRealValue)
 			
-			totalUserEquity = api.Add(totalUserEquity, api.Mul(userAssets[j].Equity, b.BeforeCexAssets[j].BasePrice))
-			totalUserDebt = api.Add(totalUserDebt, api.Mul(userAssets[j].Debt, b.BeforeCexAssets[j].BasePrice))
-
-			afterCexAssets[j].TotalEquity = api.Add(afterCexAssets[j].TotalEquity, userAssets[j].Equity)
-			afterCexAssets[j].TotalDebt = api.Add(afterCexAssets[j].TotalDebt, userAssets[j].Debt)
-			afterCexAssets[j].VipLoanCollateral = api.Add(afterCexAssets[j].VipLoanCollateral, userAssets[j].VipLoanCollateral)
-			afterCexAssets[j].MarginCollateral = api.Add(afterCexAssets[j].MarginCollateral, userAssets[j].MarginCollateral)
-			afterCexAssets[j].PortfolioMarginCollateral = api.Add(afterCexAssets[j].PortfolioMarginCollateral, userAssets[j].PortfolioMarginCollateral)
+			totalUserEquity = api.Add(totalUserEquity, api.Mul(userEquity, b.BeforeCexAssets[j].BasePrice))
+			totalUserDebt = api.Add(totalUserDebt, api.Mul(userDebt, b.BeforeCexAssets[j].BasePrice))
 		}
-		// make sure user's total Debt is less or equal than total collateral
-		api.AssertIsLessOrEqualNOp(totalUserDebt, totalUserCollateralRealValue, 128)
 
-		userAssetsCommitment := ComputeUserAssetsCommitment(api, userAssets)
-		accountHash := poseidon.Poseidon(api, b.CreateUserOps[i].AccountIdHash, totalUserEquity, totalUserDebt, userAssetsCommitment)
+
+		for j := 0; j < len(b.CreateUserOps[i].AssetsForUpdateCex); j++ {
+			afterCexAssets[j].TotalEquity = api.Add(afterCexAssets[j].TotalEquity, b.CreateUserOps[i].AssetsForUpdateCex[j].Equity)
+			afterCexAssets[j].TotalDebt = api.Add(afterCexAssets[j].TotalDebt, b.CreateUserOps[i].AssetsForUpdateCex[j].Debt)
+			afterCexAssets[j].VipLoanCollateral = api.Add(afterCexAssets[j].VipLoanCollateral, b.CreateUserOps[i].AssetsForUpdateCex[j].VipLoanCollateral)
+			afterCexAssets[j].MarginCollateral = api.Add(afterCexAssets[j].MarginCollateral, b.CreateUserOps[i].AssetsForUpdateCex[j].MarginCollateral)
+			afterCexAssets[j].PortfolioMarginCollateral = api.Add(afterCexAssets[j].PortfolioMarginCollateral, b.CreateUserOps[i].AssetsForUpdateCex[j].PortfolioMarginCollateral)
+		}
+
+		// make sure user's total Debt is less or equal than total collateral
+		r.Check(totalUserDebt, 128)
+		r.Check(totalUserCollateralRealValue, 128)
+		api.AssertIsLessOrEqualNOp(totalUserDebt, totalUserCollateralRealValue, 128, true)
+		userAssetsCommitment := ComputeUserAssetsCommitment(api, b.CreateUserOps[i].AssetsForUpdateCex)
+		accountHash := poseidon.Poseidon(api, b.CreateUserOps[i].AccountIdHash, totalUserEquity, totalUserDebt, totalUserCollateralRealValue, userAssetsCommitment)
 		actualAccountTreeRoot := UpdateMerkleProof(api, accountHash, b.CreateUserOps[i].AccountProof[:], accountIndexHelper)
 		api.AssertIsEqual(actualAccountTreeRoot, b.CreateUserOps[i].AfterAccountTreeRoot)
-
 	}
 
+	// make sure user assets contains all non-zero assets of AssetsForUpdateCex
+	// use random linear combination to check, the random number is poseidon hash of two elements: 
+	// 1. the public input of circuit -- batch commitment
+	// 2. the poseidon hash of user assets index
+	
+	userAssetIdHashes[len(b.CreateUserOps)] = b.BatchCommitment
+	randomChallenge := poseidon.Poseidon(api, userAssetIdHashes...)
+	powersOfRandomChallenge := make([]Variable, 5*len(b.BeforeCexAssets))
+	powersOfRandomChallenge[0] = randomChallenge
+	powersOfRandomChallengeLookupTable := logderivlookup.New(api)
+	powersOfRandomChallengeLookupTable.Insert(randomChallenge)
+	for i := 1; i < len(powersOfRandomChallenge); i++ {
+		powersOfRandomChallenge[i] = api.Mul(powersOfRandomChallenge[i-1], randomChallenge)
+		powersOfRandomChallengeLookupTable.Insert(powersOfRandomChallenge[i])
+	}
+
+	for i := 0; i < len(b.CreateUserOps); i++ {
+		powersOfRCResults := powersOfRandomChallengeLookupTable.Lookup(userAssetsQueries[i]...)
+		var sumA Variable = 0
+		for j := 0; j < len(powersOfRCResults); j++ {
+			sumA = api.Add(sumA, api.Mul(powersOfRCResults[j], userAssetsResults[i][j]))
+		}
+
+		var sumB Variable = 0
+		for j := 0; j < len(b.CreateUserOps[i].AssetsForUpdateCex); j++ {
+			sumB = api.Add(sumB, api.Mul(b.CreateUserOps[i].AssetsForUpdateCex[j].Equity, powersOfRandomChallenge[5*j]))
+			sumB = api.Add(sumB, api.Mul(b.CreateUserOps[i].AssetsForUpdateCex[j].Debt, powersOfRandomChallenge[5*j+1]))
+			sumB = api.Add(sumB, api.Mul(b.CreateUserOps[i].AssetsForUpdateCex[j].VipLoanCollateral, powersOfRandomChallenge[5*j+2]))
+			sumB = api.Add(sumB, api.Mul(b.CreateUserOps[i].AssetsForUpdateCex[j].MarginCollateral, powersOfRandomChallenge[5*j+3]))
+			sumB = api.Add(sumB, api.Mul(b.CreateUserOps[i].AssetsForUpdateCex[j].PortfolioMarginCollateral, powersOfRandomChallenge[5*j+4]))
+		}
+		api.AssertIsEqual(sumA, sumB)
+	}
 	tempAfterCexAssets := make([]Variable, len(b.BeforeCexAssets) * countOfCexAsset)
 	for j := 0; j < len(b.BeforeCexAssets); j++ {
 		r.Check(afterCexAssets[j].TotalEquity, 64)
@@ -157,11 +282,11 @@ func (b BatchCreateUserCircuit) Define(api API) error {
 	// verify AfterCEXAssetsCommitment is computed correctly
 	actualAfterCEXAssetsCommitment := poseidon.Poseidon(api, tempAfterCexAssets...)
 	api.AssertIsEqual(actualAfterCEXAssetsCommitment, b.AfterCEXAssetsCommitment)
-
+	api.Println("actualAfterCEXAssetsCommitment: ", actualAfterCEXAssetsCommitment)
+	api.Println("AfterCEXAssetsCommitment: ", b.AfterCEXAssetsCommitment)
 	for i := 0; i < len(b.CreateUserOps)-1; i++ {
 		api.AssertIsEqual(b.CreateUserOps[i].AfterAccountTreeRoot, b.CreateUserOps[i+1].BeforeAccountTreeRoot)
 	}
-
 	return nil
 }
 
@@ -200,19 +325,78 @@ func SetBatchCreateUserCircuitWitness(batchWitness *utils.BatchCreateUserWitness
 		copyTierRatios(witness.BeforeCexAssets[i].PortfolioMarginRatios, batchWitness.BeforeCexAssets[i].PortfolioMarginRatios[:])
 	}
 
+	cexAssetsCount := len(witness.BeforeCexAssets)
 	for i := 0; i < len(witness.CreateUserOps); i++ {
 		witness.CreateUserOps[i].BeforeAccountTreeRoot = batchWitness.CreateUserOps[i].BeforeAccountTreeRoot
 		witness.CreateUserOps[i].AfterAccountTreeRoot = batchWitness.CreateUserOps[i].AfterAccountTreeRoot
-		witness.CreateUserOps[i].Assets = make([]UserAssetInfo, len(batchWitness.CreateUserOps[i].Assets))
+		witness.CreateUserOps[i].AssetsForUpdateCex = make([]UserAssetMeta, cexAssetsCount)
+		
+		existingKeys := make([]int, 0)
 		for j := 0; j < len(batchWitness.CreateUserOps[i].Assets); j++ {
-			var userAsset UserAssetInfo
-			userAsset.Equity = batchWitness.CreateUserOps[i].Assets[j].Equity
-			userAsset.Debt = batchWitness.CreateUserOps[i].Assets[j].Debt
-			userAsset.VipLoanCollateral = batchWitness.CreateUserOps[i].Assets[j].VipLoan
-			userAsset.MarginCollateral = batchWitness.CreateUserOps[i].Assets[j].Margin
-			userAsset.PortfolioMarginCollateral = batchWitness.CreateUserOps[i].Assets[j].PortfolioMargin
+			u := batchWitness.CreateUserOps[i].Assets[j]
+			userAsset := UserAssetMeta {
+				Equity: u.Equity,
+				Debt: u.Debt,
+				VipLoanCollateral: u.VipLoan,
+				MarginCollateral: u.Margin,
+				PortfolioMarginCollateral: u.PortfolioMargin,
+			}
+			
+			witness.CreateUserOps[i].AssetsForUpdateCex[j] = userAsset
 
-			witness.CreateUserOps[i].Assets[j] = userAsset
+			if (!isAssetEmpty(&u)) {
+				existingKeys = append(existingKeys, int(u.Index))
+			}
+		}
+		paddingCounts := 0
+		targetCounts := 0
+		for _, v := range utils.AssetCountsTiers {
+			if len(existingKeys) <= v {
+				paddingCounts = v - len(existingKeys)
+				targetCounts = v
+				break
+			}
+		}
+		witness.CreateUserOps[i].Assets = make([]UserAssetInfo, targetCounts)
+		currentPaddingCounts := 0
+		currentAssetIndex := 0
+		index := 0
+		for _, v := range existingKeys {
+			if currentPaddingCounts < paddingCounts {
+				for k := currentAssetIndex; k < v; k++ {
+					currentPaddingCounts += 1
+					witness.CreateUserOps[i].Assets[index] = UserAssetInfo{
+						AssetIndex: uint32(k),
+						VipLoanCollateralIndex: 0,
+						VipLoanCollateralFlag: 0,
+						MarginCollateralIndex: 0,
+						MarginCollateralFlag: 0,
+						PortfolioMarginCollateralIndex: 0,
+						PortfolioMarginCollateralFlag: 0,
+					}
+					index += 1
+					if currentPaddingCounts >= paddingCounts {
+						break
+					}
+				}
+			}
+			var uAssetInfo UserAssetInfo
+			uAssetInfo.AssetIndex = uint32(v)
+			CalcAndSetCollateralInfo(v, &uAssetInfo, &batchWitness.CreateUserOps[i].Assets[v], batchWitness.BeforeCexAssets)
+			witness.CreateUserOps[i].Assets[index] = uAssetInfo
+			index += 1
+			currentAssetIndex = v + 1
+		}
+		for k := index; k < targetCounts; k++ {
+			witness.CreateUserOps[i].Assets[k] = UserAssetInfo{
+				AssetIndex: uint32(k),
+				VipLoanCollateralIndex: 0,
+				VipLoanCollateralFlag: 0,
+				MarginCollateralIndex: 0,
+				MarginCollateralFlag: 0,
+				PortfolioMarginCollateralIndex: 0,
+				PortfolioMarginCollateralFlag: 0,
+			}
 		}
 		witness.CreateUserOps[i].AccountIdHash = batchWitness.CreateUserOps[i].AccountIdHash
 		witness.CreateUserOps[i].AccountIndex = batchWitness.CreateUserOps[i].AccountIndex
@@ -221,4 +405,11 @@ func SetBatchCreateUserCircuitWitness(batchWitness *utils.BatchCreateUserWitness
 		}
 	}
 	return witness, nil
+}
+
+func isAssetEmpty(ua *utils.AccountAsset) bool {
+	if (ua.Debt == 0 && ua.Equity == 0 && ua.Margin == 0 && ua.PortfolioMargin == 0 && ua.VipLoan == 0) {
+		return true
+	}
+	return false
 }

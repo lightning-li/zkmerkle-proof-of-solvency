@@ -32,28 +32,38 @@ type CexAssetInfo struct {
 }
 
 type UserAssetInfo struct {
-	Equity Variable
-	Debt   Variable
+	AssetIndex Variable 
+	// Equity Variable
+	// Debt   Variable
 
-	VipLoanCollateral     		Variable
+	// VipLoanCollateral     		Variable
 	// The index means the position of tier ratios where the boundary value is larger than the collateral.
 	VipLoanCollateralIndex	 	Variable
 	// If the flag is 1, the boundary value of last tier ratio is less than the collateral.
 	VipLoanCollateralFlag	 	Variable
 
-	MarginCollateral      		Variable
+	// MarginCollateral      		Variable
 	MarginCollateralIndex	 	Variable
 	MarginCollateralFlag	 	Variable
 
-	PortfolioMarginCollateral   Variable
+	// PortfolioMarginCollateral   Variable
 	PortfolioMarginCollateralIndex Variable
 	PortfolioMarginCollateralFlag Variable
+}
+
+type UserAssetMeta struct {
+	Equity 						Variable
+	Debt   						Variable
+	VipLoanCollateral    		Variable
+	MarginCollateral      		Variable
+	PortfolioMarginCollateral   Variable
 }
 
 type CreateUserOperation struct {
 	BeforeAccountTreeRoot Variable
 	AfterAccountTreeRoot  Variable
 	Assets                []UserAssetInfo
+	AssetsForUpdateCex    []UserAssetMeta
 	AccountIndex          Variable
 	AccountIdHash         Variable
 	AccountProof          [utils.AccountTreeDepth]Variable

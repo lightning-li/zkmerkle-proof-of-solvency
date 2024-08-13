@@ -18,6 +18,7 @@ import (
 type MockCollateralCircuit struct {
 	
 	UAssetInfo                  []UserAssetInfo
+	UAssetMataInfo              []UserAssetMeta
 	AssetId                     []int
 
 	CAssetInfo 				 	[]CexAssetInfo
@@ -38,7 +39,10 @@ func (circuit MockCollateralCircuit) Define(api API) error {
 	t := ConstructTierRatiosLookupTable(api, circuit.CAssetInfo)
 
 	for i := 0; i < len(circuit.UAssetInfo); i++ {
-		collateralValues := GetAndCheckTierRatiosQueryResults(api, r, t, circuit.AssetId[i], circuit.UAssetInfo[i], 
+		collateralValues := GetAndCheckTierRatiosQueryResults(api, r, t, circuit.UAssetInfo[i], 
+											circuit.UAssetMataInfo[i].VipLoanCollateral,
+											circuit.UAssetMataInfo[i].MarginCollateral,
+											circuit.UAssetMataInfo[i].PortfolioMarginCollateral,
 											circuit.CAssetInfo[circuit.AssetId[i]].BasePrice, 
 											3*(len(circuit.CAssetInfo[circuit.AssetId[i]].VipLoanRatios)+1), 
 											3*(len(circuit.CAssetInfo[circuit.AssetId[i]].MarginRatios)+1), 
@@ -61,6 +65,7 @@ func TestMockCollateralCircuit(t *testing.T) {
 	}
 	circuit.AssetId = make([]int, 2)
 	circuit.UAssetInfo = make([]UserAssetInfo, 2)
+	circuit.UAssetMataInfo = make([]UserAssetMeta, 2)
 	circuit.ExpectedVipLoanCollateral = make([]Variable, 2)
 	circuit.ExpectedMarginCollateral = make([]Variable, 2)
 	circuit.ExpectedPortfolioMarginCollateral = make([]Variable, 2)
@@ -111,40 +116,41 @@ func TestMockCollateralCircuit(t *testing.T) {
 
 	circuit2.AssetId = []int{0, 1}
 	circuit2.UAssetInfo = make([]UserAssetInfo, 2)
+	circuit2.UAssetMataInfo = make([]UserAssetMeta, 2)
 	circuit2.ExpectedMarginCollateral = make([]Variable, 2)
 	circuit2.ExpectedVipLoanCollateral = make([]Variable, 2)
 	circuit2.ExpectedPortfolioMarginCollateral = make([]Variable, 2)
 
-	circuit2.UAssetInfo[0].Equity = 0
-	circuit2.UAssetInfo[0].Debt = 0
-	circuit2.UAssetInfo[0].VipLoanCollateral = 9000
+	circuit2.UAssetMataInfo[0].Equity = 0
+	circuit2.UAssetMataInfo[0].Debt = 0
+	circuit2.UAssetMataInfo[0].VipLoanCollateral = 9000
 	circuit2.UAssetInfo[0].VipLoanCollateralIndex = 0
 	circuit2.UAssetInfo[0].VipLoanCollateralFlag = 0
 	circuit2.ExpectedVipLoanCollateral[0] = 9000
 	
-	circuit2.UAssetInfo[0].MarginCollateral = 39000
+	circuit2.UAssetMataInfo[0].MarginCollateral = 39000
 	circuit2.UAssetInfo[0].MarginCollateralIndex = 1
 	circuit2.UAssetInfo[0].MarginCollateralFlag = 0
 	circuit2.ExpectedMarginCollateral[0] = 37290
 
-	circuit2.UAssetInfo[0].PortfolioMarginCollateral = 300100
+	circuit2.UAssetMataInfo[0].PortfolioMarginCollateral = 300100
 	circuit2.UAssetInfo[0].PortfolioMarginCollateralIndex = 9
 	circuit2.UAssetInfo[0].PortfolioMarginCollateralFlag = 1
 	circuit2.ExpectedPortfolioMarginCollateral[0] = 192000
 
-	circuit2.UAssetInfo[1].Equity = 0
-	circuit2.UAssetInfo[1].Debt = 0
-	circuit2.UAssetInfo[1].VipLoanCollateral = 100001
+	circuit2.UAssetMataInfo[1].Equity = 0
+	circuit2.UAssetMataInfo[1].Debt = 0
+	circuit2.UAssetMataInfo[1].VipLoanCollateral = 100001
 	circuit2.UAssetInfo[1].VipLoanCollateralIndex = 9
 	circuit2.UAssetInfo[1].VipLoanCollateralFlag = 1
 	circuit2.ExpectedVipLoanCollateral[1] = 55000
 	
-	circuit2.UAssetInfo[1].MarginCollateral = 10000
+	circuit2.UAssetMataInfo[1].MarginCollateral = 10000
 	circuit2.UAssetInfo[1].MarginCollateralIndex = 0
 	circuit2.UAssetInfo[1].MarginCollateralFlag = 0
 	circuit2.ExpectedMarginCollateral[1] = 10000
 
-	circuit2.UAssetInfo[1].PortfolioMarginCollateral = 200000
+	circuit2.UAssetMataInfo[1].PortfolioMarginCollateral = 200000
 	circuit2.UAssetInfo[1].PortfolioMarginCollateralIndex = 6
 	circuit2.UAssetInfo[1].PortfolioMarginCollateralFlag = 0
 	circuit2.ExpectedPortfolioMarginCollateral[1] = 154400

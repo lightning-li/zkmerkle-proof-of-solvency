@@ -91,6 +91,6 @@ require (
 )
 
 replace (
-	github.com/consensys/gnark => github.com/lightning-li/gnark v0.10.1-0.20240725142611-b7c3a15c84fa
-	github.com/consensys/gnark-crypto => github.com/lightning-li/gnark-crypto v0.13.1-0.20240725135535-d02ed8bc593f
+	github.com/consensys/gnark => github.com/lightning-li/gnark v0.10.1-0.20240813011322-8ee8b4ea6814
+	github.com/consensys/gnark-crypto => github.com/lightning-li/gnark-crypto v0.13.1-0.20240813011259-63bad4d6db5c
 )

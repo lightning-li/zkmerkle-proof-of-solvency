@@ -142,20 +142,20 @@ func ComputeUserAssetsCommitment(hasher *hash.Hash, assets []AccountAsset) []byt
 	return (*hasher).Sum(nil)
 }
 
-func ParseUserDataSet(dirname string) ([]AccountInfo, []CexAssetInfo, error) {
+func ParseUserDataSet(dirname string) (map[int][]AccountInfo, []CexAssetInfo, error) {
 	const CEX_ASSET_INFO_FILE string = "cex_assets_info.csv"
 	userFiles, err := os.ReadDir(dirname)
 	if err != nil {
 		return nil, nil, err
 	}
-	var accountInfo []AccountInfo
+	accountInfo := make(map[int][]AccountInfo)
 	var cexAssetInfo []CexAssetInfo
 
 	workersNum := 8
 	userFileNames := make([]string, 0)
 
 	type UserParseRes struct {
-		accounts []AccountInfo
+		accounts map[int][]AccountInfo
 	}
 	results := make([]chan UserParseRes, workersNum)
 	for i := 0; i < workersNum; i++ {
@@ -216,11 +216,18 @@ func ParseUserDataSet(dirname string) ([]AccountInfo, []CexAssetInfo, error) {
 		for i := 0; i < len(userFileNames); i++ {
 			res := <-results[i%workersNum]
 			if i != 0 {
-				for j := 0; j < len(res.accounts); j++ {
-					res.accounts[j].AccountIndex += uint32(len(accountInfo))
+				for _, v := range res.accounts {
+					for k := 0; k < len(v); k++ {
+						v[k].AccountIndex += uint32(len(accountInfo))
+					}
 				}
 			}
-			accountInfo = append(accountInfo, res.accounts...)
+			for k, v := range res.accounts {
+				if accountInfo[k] == nil {
+					accountInfo[k] = make([]AccountInfo, 0, len(v))
+				}
+				accountInfo[k] = append(accountInfo[k], v...)
+			}
 		}
 		quit <- true
 	}()
@@ -290,7 +297,6 @@ func ParseTiersRatioFromStr(tiersRatioEnc string) ([TierCount]TierRatio, error) 
 	tiersRatioStrs := strings.Split(tiersRatioEnc, ",")
 	tiersRatio := make([]TierRatio, 0, 10)
 	valueMultiplier := new(big.Int).SetUint64(10000000000000000)
-	precomputedValue := new(big.Int).SetUint64(0)
 	for i := 0; i < len(tiersRatioStrs); i += 1 {
 		tmpTierRatio := strings.Split(tiersRatioStrs[i], ":")
 		rangeValues := strings.Split(tmpTierRatio[0], "-")
@@ -319,19 +325,28 @@ func ParseTiersRatioFromStr(tiersRatioEnc string) ([TierCount]TierRatio, error) 
 		if boundaryValueBigInt.Cmp(lowBoundaryValueBigInt) < 0 {
 			return PaddingTierRatios([]TierRatio{}), errors.New("tiers boundry value data wrong")
 		}
-		
-		diffValue := new(big.Int).Sub(boundaryValueBigInt, lowBoundaryValueBigInt)
-
-		precomputedValue.Add(precomputedValue, diffValue.Mul(diffValue, new(big.Int).SetUint64(ratio)).Div(diffValue, PercentageMultiplier))
-		
 		tiersRatio = append(tiersRatio, TierRatio{
 			BoundaryValue: boundaryValueBigInt,
 			Ratio:         uint8(ratio),
-			PrecomputedValue: new(big.Int).Set(precomputedValue),
 		})
 	}
+	CalculatePrecomputedValue(tiersRatio)
 	return PaddingTierRatios(tiersRatio), nil
 
+}
+
+func CalculatePrecomputedValue(tiersRatio []TierRatio) {
+	precomputedValue := new(big.Int).SetUint64(0)
+	for i := 0; i < len(tiersRatio); i++ {
+		var diffValue *big.Int
+		if i == 0 {
+			diffValue = new(big.Int).Sub(tiersRatio[i].BoundaryValue, new(big.Int).SetUint64(0))
+		} else {
+			diffValue = new(big.Int).Sub(tiersRatio[i].BoundaryValue, tiersRatio[i-1].BoundaryValue)
+		}
+		precomputedValue.Add(precomputedValue, diffValue.Mul(diffValue, new(big.Int).SetUint64(uint64(tiersRatio[i].Ratio))).Div(diffValue, PercentageMultiplier))
+		tiersRatio[i].PrecomputedValue.Set(precomputedValue)
+	}
 }
 
 func ParseCexAssetInfoFromFile(name string, assetIndexes []string) ([]CexAssetInfo, error) {
@@ -398,7 +413,7 @@ func ParseCexAssetInfoFromFile(name string, assetIndexes []string) ([]CexAssetIn
 
 }
 
-func ReadUserDataFromCsvFile(name string, cexAssetsInfo []CexAssetInfo) ([]AccountInfo, error) {
+func ReadUserDataFromCsvFile(name string, cexAssetsInfo []CexAssetInfo) (map[int][]AccountInfo, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
@@ -410,7 +425,7 @@ func ReadUserDataFromCsvFile(name string, cexAssetsInfo []CexAssetInfo) ([]Accou
 		return nil, err
 	}
 	accountIndex := 0
-	accounts := make([]AccountInfo, len(data)-1)
+	accounts := make(map[int][]AccountInfo)
 	// rn, id,
 	// equity_assetA, debt_assetA, assetA, assetA_viploan, assetA_margin, assetA_portfolio_margin,
 	// equity_assetB, debt_assetB, assetB, assetB_viploan, assetB_margin, assetA_portfolio_margin,
@@ -513,8 +528,16 @@ func ReadUserDataFromCsvFile(name string, cexAssetsInfo []CexAssetInfo) ([]Accou
 		if !invalidAccountFlag {
 			account.Assets = assets
 			if account.TotalCollateral.Cmp(account.TotalDebt) >= 0 {
-				accounts[accountIndex] = account
 				accountIndex += 1
+				for p := 0; p < len(AssetCountsTiers); p++ {
+					if len(account.Assets) <= AssetCountsTiers[p] {
+						if accounts[AssetCountsTiers[p]] == nil {
+							accounts[AssetCountsTiers[p]] = make([]AccountInfo, 0, len(data))
+						}
+						accounts[AssetCountsTiers[p]] = append(accounts[AssetCountsTiers[p]], account)
+						break
+					}
+				}
 			} else {
 				invalidCounts += 1
 				fmt.Println("account", data[i][1], "data wrong: total debt is bigger than collateral:", account.TotalDebt, account.TotalCollateral)
@@ -524,9 +547,12 @@ func ReadUserDataFromCsvFile(name string, cexAssetsInfo []CexAssetInfo) ([]Accou
 			runtime.GC()
 		}
 	}
-	accounts = accounts[:accountIndex]
 	fmt.Println("The invalid accounts number is ", invalidCounts)
-	fmt.Println("The valid accounts number is ", len(accounts))
+	validAccountNum := 0
+	for _,v := range accounts {
+		validAccountNum += len(v)
+	}
+	fmt.Println("The valid accounts number is ", validAccountNum)
 	return accounts, nil
 }
 
@@ -605,6 +631,16 @@ func DecodeBatchWitness(data string) *BatchCreateUserWitness {
 	}
 	for i := 0; i < len(witnessForCircuit.CreateUserOps); i++ {
 		userAssets := make([]AccountAsset, AssetCounts)
+		for p := 0; p < AssetCounts; p++ {
+			userAssets[p] = AccountAsset{
+				Index: uint16(p),
+				Equity: 0,
+				Debt: 0,
+				VipLoan: 0,
+				Margin: 0,
+				PortfolioMargin: 0,
+			}
+		}
 		storeUserAssets := witnessForCircuit.CreateUserOps[i].Assets
 		for p := 0; p < len(storeUserAssets); p++ {
 			userAssets[storeUserAssets[p].Index] = storeUserAssets[p]
@@ -618,7 +654,7 @@ func AccountInfoToHash(account *AccountInfo, hasher *hash.Hash) []byte {
 	assetCommitment := ComputeUserAssetsCommitment(hasher, account.Assets)
 	(*hasher).Reset()
 	// compute new account leaf node hash
-	accountHash := poseidon.PoseidonBytes(account.AccountId, account.TotalEquity.Bytes(), account.TotalDebt.Bytes(), assetCommitment)
+	accountHash := poseidon.PoseidonBytes(account.AccountId, account.TotalEquity.Bytes(), account.TotalDebt.Bytes(), account.TotalCollateral.Bytes(), assetCommitment)
 	return accountHash
 }
 
@@ -649,6 +685,11 @@ func RecoverAfterCexAssets(witness *BatchCreateUserWitness) []CexAssetInfo {
 func ComputeCexAssetsCommitment(cexAssetsInfo []CexAssetInfo) []byte {
 	hasher := poseidon.NewPoseidon()
 	emptyCexAssets := make([]CexAssetInfo, AssetCounts-len(cexAssetsInfo))
+	for i := len(cexAssetsInfo); i < AssetCounts; i++ {
+		emptyCexAssets[i-len(cexAssetsInfo)] = CexAssetInfo{
+			Index: uint32(i),
+		}
+	}
 	cexAssetsInfo = append(cexAssetsInfo, emptyCexAssets...)
 	for i := 0; i < len(cexAssetsInfo); i++ {
 		commitments := ConvertAssetInfoToBytes(cexAssetsInfo[i])

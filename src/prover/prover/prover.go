@@ -19,7 +19,7 @@ import (
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std"
-	"github.com/zeromicro/go-zero/core/logx"
+	// "github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/redis"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -38,7 +38,7 @@ type Prover struct {
 	redisConn    *redis.Redis
 
 	VerifyingKeys groth16.VerifyingKey
-	ProvingKeys   []groth16.ProvingKey
+	ProvingKeys   groth16.ProvingKey
 	SessionName   string
 	R1cs          constraint.ConstraintSystem
 }
@@ -57,6 +57,7 @@ func NewProver(config *config.Config) *Prover {
 	}
 
 	std.RegisterHints()
+	s := time.Now()
 	fmt.Println("begin loading r1cs...")
 	loadR1csChan := make(chan bool)
 	go func() {
@@ -71,31 +72,48 @@ func NewProver(config *config.Config) *Prover {
 			}
 		}
 	}()
-	nbConstraints, err := LoadR1CSLen(config.ZkKeyName + ".r1cslen")
-	if err != nil {
-		panic("r1cs len load error...")
-	}
 
 	prover.R1cs = groth16.NewCS(ecc.BN254)
-	prover.R1cs.LoadFromSplitBinaryConcurrent(config.ZkKeyName, nbConstraints, utils.R1csBatchSize, runtime.NumCPU())
+	r1csFromFile, err := os.ReadFile(config.ZkKeyName + ".r1cs")
+	if err != nil {
+		panic("r1cs file load error..." + err.Error())
+	}
+	buf := bytes.NewBuffer(r1csFromFile)
+	n, err := prover.R1cs.ReadFrom(buf)
+	if err != nil {
+		panic("r1cs read error..." + err.Error())
+	}
+	fmt.Println("r1cs read size is ", n)
 	// circuit := circuit.NewBatchCreateUserCircuit(utils.AssetCounts, utils.BatchCreateUserOpsCounts)
 	// prover.R1cs, err = frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit, frontend.IgnoreUnconstrainedInputs(), frontend.WithGKRBN(0))
 	loadR1csChan <- true
 	runtime.GC()
-	fmt.Println("finish loading r1cs...")
+	et := time.Now()
+	fmt.Println("finish loading r1cs.... the time cost is ", et.Sub(s))
 	// read proving and verifying keys
 	fmt.Println("begin loading proving key...")
-	prover.ProvingKeys, err = LoadProvingKey(config.ZkKeyName)
+	s = time.Now()
+	pkFromFile, err := os.ReadFile(config.ZkKeyName + ".pk")
+	buf = bytes.NewBuffer(pkFromFile)
+	n, err = prover.ProvingKeys.UnsafeReadFrom(buf)
 	if err != nil {
-		panic("provingKey loading error")
+		panic("provingKey loading error:" + err.Error())
 	}
-	fmt.Println("finish loading proving key...")
+	fmt.Println("proving key read size is ", n)
+	et = time.Now()
+	fmt.Println("finish loading proving key... the time cost is ", et.Sub(s))
+	
 	fmt.Println("begin loading verifying key...")
-	prover.VerifyingKeys, err = LoadVerifyingKey(config.ZkKeyName)
+	s = time.Now()
+	vkFromFile, err := os.ReadFile(config.ZkKeyName + ".vk")
+	buf = bytes.NewBuffer(vkFromFile)
+	n, err = prover.VerifyingKeys.ReadFrom(buf)
 	if err != nil {
-		panic("verifyingKey loading error")
+		panic("verifyingKey loading error:" + err.Error())
 	}
-	fmt.Println("finish loading verifying key...")
+	fmt.Println("verifying key read size is ", n)
+	et = time.Now()
+	fmt.Println("finish loading verifying key.. the time cost is ", et.Sub(s))
 	return &prover
 }
 
@@ -227,40 +245,40 @@ func (p *Prover) Run(flag bool) {
 	}
 }
 
-func LoadR1CSLen(filename string) (nbConstraints int, err error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return -1, fmt.Errorf("read file error")
-	}
-	defer f.Close()
+// func LoadR1CSLen(filename string) (nbConstraints int, err error) {
+// 	f, err := os.Open(filename)
+// 	if err != nil {
+// 		return -1, fmt.Errorf("read file error")
+// 	}
+// 	defer f.Close()
 
-	var value int
-	_, err = fmt.Fscanf(f, "%d", &value)
-	if err != nil {
-		return -1, err
-	}
+// 	var value int
+// 	_, err = fmt.Fscanf(f, "%d", &value)
+// 	if err != nil {
+// 		return -1, err
+// 	}
 
-	return value, nil
-}
+// 	return value, nil
+// }
 
-func LoadProvingKey(filepath string) (pks []groth16.ProvingKey, err error) {
-	logx.Info("start reading proving key")
-	return groth16.ReadSegmentProveKey(ecc.BN254, filepath)
-}
+// func LoadProvingKey(filepath string) (pks []groth16.ProvingKey, err error) {
+// 	logx.Info("start reading proving key")
+// 	return groth16.ReadSegmentProveKey(ecc.BN254, filepath)
+// }
 
-func LoadVerifyingKey(filepath string) (verifyingKey groth16.VerifyingKey, err error) {
-	verifyingKey = groth16.NewVerifyingKey(ecc.BN254)
-	f, _ := os.Open(filepath + ".vk.save")
-	_, err = verifyingKey.ReadFrom(f)
-	if err != nil {
-		return verifyingKey, fmt.Errorf("read file error")
-	}
-	f.Close()
-	return verifyingKey, nil
-}
+// func LoadVerifyingKey(filepath string) (verifyingKey groth16.VerifyingKey, err error) {
+// 	verifyingKey = groth16.NewVerifyingKey(ecc.BN254)
+// 	f, _ := os.Open(filepath + ".vk.save")
+// 	_, err = verifyingKey.ReadFrom(f)
+// 	if err != nil {
+// 		return verifyingKey, fmt.Errorf("read file error")
+// 	}
+// 	f.Close()
+// 	return verifyingKey, nil
+// }
 
 func GenerateAndVerifyProof(r1cs constraint.ConstraintSystem,
-	provingKey []groth16.ProvingKey,
+	provingKey   groth16.ProvingKey,
 	verifyingKey groth16.VerifyingKey,
 	batchWitness *utils.BatchCreateUserWitness,
 	zkKeyName string,
@@ -279,7 +297,7 @@ func GenerateAndVerifyProof(r1cs constraint.ConstraintSystem,
 	if err != nil {
 		return proof, err
 	}
-	proof, err = groth16.ProveRoll(r1cs, provingKey[0], provingKey[1], witness, zkKeyName)
+	proof, err = groth16.Prove(r1cs, provingKey, witness)
 	if err != nil {
 		return proof, err
 	}
