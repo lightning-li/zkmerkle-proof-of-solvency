@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/quotedprintable"
 	"os"
 	"runtime"
 	"time"
@@ -17,8 +18,10 @@ import (
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std"
+
 	// "github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/redis"
 	"gorm.io/driver/mysql"
@@ -57,6 +60,7 @@ func NewProver(config *config.Config) *Prover {
 	}
 
 	std.RegisterHints()
+	solver.RegisterHint(circuit.IntegerDivision)
 	s := time.Now()
 	fmt.Println("begin loading r1cs...")
 	loadR1csChan := make(chan bool)
@@ -94,7 +98,11 @@ func NewProver(config *config.Config) *Prover {
 	fmt.Println("begin loading proving key...")
 	s = time.Now()
 	pkFromFile, err := os.ReadFile(config.ZkKeyName + ".pk")
+	if err != nil {
+		panic("provingKey file load error:" + err.Error())
+	}
 	buf = bytes.NewBuffer(pkFromFile)
+	prover.ProvingKeys = groth16.NewProvingKey(ecc.BN254)
 	n, err = prover.ProvingKeys.UnsafeReadFrom(buf)
 	if err != nil {
 		panic("provingKey loading error:" + err.Error())
@@ -107,6 +115,7 @@ func NewProver(config *config.Config) *Prover {
 	s = time.Now()
 	vkFromFile, err := os.ReadFile(config.ZkKeyName + ".vk")
 	buf = bytes.NewBuffer(vkFromFile)
+	prover.VerifyingKeys = groth16.NewVerifyingKey(ecc.BN254)
 	n, err = prover.VerifyingKeys.ReadFrom(buf)
 	if err != nil {
 		panic("verifyingKey loading error:" + err.Error())
