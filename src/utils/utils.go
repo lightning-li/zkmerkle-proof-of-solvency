@@ -345,7 +345,7 @@ func CalculatePrecomputedValue(tiersRatio []TierRatio) {
 			diffValue = new(big.Int).Sub(tiersRatio[i].BoundaryValue, tiersRatio[i-1].BoundaryValue)
 		}
 		precomputedValue.Add(precomputedValue, diffValue.Mul(diffValue, new(big.Int).SetUint64(uint64(tiersRatio[i].Ratio))).Div(diffValue, PercentageMultiplier))
-		tiersRatio[i].PrecomputedValue.Set(precomputedValue)
+		tiersRatio[i].PrecomputedValue = new(big.Int).Set(precomputedValue)
 	}
 }
 
@@ -398,7 +398,7 @@ func ParseCexAssetInfoFromFile(name string, assetIndexes []string) ([]CexAssetIn
 		cexAssets2Info[tmpCexAssetInfo.Symbol] = tmpCexAssetInfo
 	}
 	
-	cexAssetsInfo := make([]CexAssetInfo, len(assetIndexes))
+	cexAssetsInfo := make([]CexAssetInfo, AssetCounts)
 
 	if len(assetIndexes) != len(cexAssets2Info) {
 		fmt.Println("the length of asset indexes is not equal to the length of cex assets info")
@@ -408,7 +408,16 @@ func ParseCexAssetInfoFromFile(name string, assetIndexes []string) ([]CexAssetIn
 		cexAssetsInfo[i] = cexAssets2Info[assetIndexes[i]]
 		cexAssetsInfo[i].Index = uint32(i)
 	}
-
+	for i := len(assetIndexes); i < AssetCounts; i++ {
+		cexAssetsInfo[i] = CexAssetInfo {
+			Symbol: "reserved",
+			BasePrice: 0,
+			VipLoanRatios: PaddingTierRatios([]TierRatio{}),
+			MarginRatios: PaddingTierRatios([]TierRatio{}),
+			PortfolioMarginRatios: PaddingTierRatios([]TierRatio{}),
+			Index: uint32(i),
+		}
+	}
 	return cexAssetsInfo, nil
 
 }

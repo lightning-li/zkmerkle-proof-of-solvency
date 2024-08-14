@@ -39,15 +39,25 @@ var (
 
 	AssetTypeForTwoDigits         = map[string]bool{
 		"BTTC":  true,
+		"bttc":  true,
 		"SHIB":  true,
+		"shib":  true,
 		"LUNC":  true,
+		"lunc":  true,
 		"XEC":   true,
+		"xec":   true,
 		"WIN":   true,
+		"win":   true,
 		"BIDR":  true,
+		"bidr":  true,
 		"SPELL": true,
+		"spell": true,
 		"HOT":   true,
+		"hot":   true,
 		"DOGE":  true,
+		"doge":  true,
         "PEPE":  true,
+		"pepe":  true,
 	}
 	// the key is the number of assets user own
 	// the value is the number of batch create user ops

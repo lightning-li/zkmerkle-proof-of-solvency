@@ -32,7 +32,6 @@ func main() {
 	}
 
 	accounts, cexAssetsInfo, err := utils.ParseUserDataSet(witnessConfig.UserDataFile)
-	fmt.Println("account counts", len(accounts))
 	if err != nil {
 		panic(err.Error())
 	}
@@ -44,10 +43,11 @@ func main() {
 	fmt.Printf("account tree root is %x\n", accountTree.Root())
 
 	totalAccountNum := 0
-	for _, v := range accounts {
+	for k, v := range accounts {
 		totalAccountNum += len(v)
+		fmt.Println("the asset counts of user is ", k, "total ops number is ", len(v))
 	}
-	witnessService := witness.NewWitness(accountTree, uint32(totalAccountNum), accounts, cexAssetsInfo, assets2UserCounts, witnessConfig)
+	witnessService := witness.NewWitness(accountTree, uint32(totalAccountNum), accounts, cexAssetsInfo, witnessConfig)
 	witnessService.Run()
 	fmt.Println("witness service run finished...")
 }

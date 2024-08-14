@@ -150,7 +150,7 @@ def get_debt_value(token_name, vl_token_num, m_token_num, pm_token_num,
 
 def get_debt_token_num(token_name, vl_token_num, m_token_num, pm_token_num,
                 vltoken2tiersratio, mtoken2tiersratio, pmtoken2tiersratio, token2price):
-    debt_token_value = get_debt_value(token_name, vl_token_num, m_token_num, pm_token_num, vltoken2tiersratio, mtoken2tiersratio, pmtoken2tiersratio, token2price)
+    debt_token_value = 10 + get_debt_value(token_name, vl_token_num, m_token_num, pm_token_num, vltoken2tiersratio, mtoken2tiersratio, pmtoken2tiersratio, token2price)
     debt_token_value = debt_token_value / token2price[token_name]
     debt_token_num = 0
     roundPrecision = 8

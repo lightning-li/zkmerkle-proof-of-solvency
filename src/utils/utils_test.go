@@ -114,18 +114,30 @@ func TestParseUserDataSet(t *testing.T) {
 	if err != nil {
 		t.Errorf("error: %s\n", err.Error())
 	}
-	if len(accounts) != 170 {
-		t.Errorf("error: %d\n", len(accounts))
+	totalNum := 0
+	for _, v  := range accounts {
+		totalNum += len(v)
+	}
+	if totalNum != 170 {
+		t.Errorf("error: %d\n", totalNum)
 	}
 
 	_ = cexAssetsInfo
 	accounts0, _ := ReadUserDataFromCsvFile("../sampledata/sample_users0.csv", cexAssetsInfo)
-	if len(accounts0) != 90 {
-		t.Errorf("error: %d\n", len(accounts0))
+	totalNum = 0
+	for _, v  := range accounts0 {
+		totalNum += len(v)
+	}
+	if totalNum != 90 {
+		t.Errorf("error: %d\n", totalNum)
 	}
 	accounts1, _ := ReadUserDataFromCsvFile("../sampledata/sample_users1.csv", cexAssetsInfo)
-	if len(accounts1) != 80 {
-		t.Errorf("error: %d\n", len(accounts0))
+	totalNum = 0
+	for _, v := range accounts1 {
+		totalNum += len(v)
+	}
+	if totalNum != 80 {
+		t.Errorf("error: %d\n", totalNum)
 	}
 
 }
