@@ -226,7 +226,7 @@ func (w *Witness) Run() {
 	}
 	close(w.ch)
 	<-w.quit
-	fmt.Println("cex assets info is ", w.cexAssets)
+	// fmt.Println("cex assets info is ", w.cexAssets)
 	fmt.Printf("witness run finished, the account tree root is %x\n", w.accountTree.Root())
 }
 

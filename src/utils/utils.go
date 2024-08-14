@@ -216,9 +216,13 @@ func ParseUserDataSet(dirname string) (map[int][]AccountInfo, []CexAssetInfo, er
 		for i := 0; i < len(userFileNames); i++ {
 			res := <-results[i%workersNum]
 			if i != 0 {
+				currentAccountIndex := 0
+				for _, v := range accountInfo {
+					currentAccountIndex += len(v)
+				}
 				for _, v := range res.accounts {
 					for k := 0; k < len(v); k++ {
-						v[k].AccountIndex += uint32(len(accountInfo))
+						v[k].AccountIndex += uint32(currentAccountIndex)
 					}
 				}
 			}
@@ -674,6 +678,9 @@ func RecoverAfterCexAssets(witness *BatchCreateUserWitness) []CexAssetInfo {
 			asset := &witness.CreateUserOps[i].Assets[j]
 			cexAssets[asset.Index].TotalEquity = SafeAdd(cexAssets[asset.Index].TotalEquity, asset.Equity)
 			cexAssets[asset.Index].TotalDebt = SafeAdd(cexAssets[asset.Index].TotalDebt, asset.Debt)
+			cexAssets[asset.Index].VipLoanCollateral = SafeAdd(cexAssets[asset.Index].VipLoanCollateral, asset.VipLoan)
+			cexAssets[asset.Index].MarginCollateral = SafeAdd(cexAssets[asset.Index].MarginCollateral, asset.Margin)
+			cexAssets[asset.Index].PortfolioMarginCollateral = SafeAdd(cexAssets[asset.Index].PortfolioMarginCollateral, asset.PortfolioMargin)
 		}
 	}
 	// sanity check

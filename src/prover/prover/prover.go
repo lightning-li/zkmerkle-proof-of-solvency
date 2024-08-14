@@ -19,9 +19,7 @@ import (
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
-	"github.com/consensys/gnark/std"
 
-	// "github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/redis"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -58,7 +56,7 @@ func NewProver(config *config.Config) *Prover {
 		SessionName:  config.ZkKeyName,
 	}
 
-	std.RegisterHints()
+	// std.RegisterHints()
 	solver.RegisterHint(circuit.IntegerDivision)
 	s := time.Now()
 	fmt.Println("begin loading r1cs...")
