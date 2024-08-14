@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mime/quotedprintable"
 	"os"
 	"runtime"
 	"time"

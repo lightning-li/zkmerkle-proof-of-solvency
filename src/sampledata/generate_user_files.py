@@ -189,10 +189,10 @@ def get_collateral_value(token_name, token_num, token2tiersratio, token2price):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("should specify the id, invalid account counts")
+    if len(sys.argv) != 4:
+        print("should specify the id, total account counts, and invalid account counts")
         exit(1)
     id = int(sys.argv[1])
-    account_counts = 100
-    invalid_account_counts = int(sys.argv[2])
+    account_counts = int(sys.argv[2])
+    invalid_account_counts = int(sys.argv[3])
     generate_data(id, account_counts, invalid_account_counts)
