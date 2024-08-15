@@ -20,6 +20,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"sync"
 )
 
 type Witness struct {
@@ -130,11 +131,14 @@ func (w *Witness) Run() {
 	startBatchMum := 0
 	recoveredBatchNum := int(height)
 	for p, k := range w.batchNumberMappingKeys {
+		var wg sync.WaitGroup
 		endBatchNum := w.batchNumberMappingValues[p]
 		userOpsPerBatch = utils.BatchCreateUserOpsCountsTiers[k]
 		averageCount := userOpsPerBatch/workersNum + 1
 		for i := 0; i < workersNum; i++ {
+			wg.Add(1)
 			go func(index int) {
+				defer wg.Done()
 				for j := startBatchMum; j < endBatchNum; j++ {
 					if j <= recoveredBatchNum {
 						continue
@@ -154,13 +158,6 @@ func (w *Witness) Run() {
 				}
 			}(i)
 		}
-		startBatchMum = endBatchNum
-	}
-
-	startBatchMum = 0
-	for p, k := range w.batchNumberMappingKeys {
-		endBatchNum := w.batchNumberMappingValues[p]
-		userOpsPerBatch = utils.BatchCreateUserOpsCountsTiers[k]
 			
 		for i := startBatchMum; i < endBatchNum; i++ {
 			if i <= recoveredBatchNum {
@@ -222,8 +219,10 @@ func (w *Witness) Run() {
 			// fmt.Printf("ver is %d account tree root is %x\n", ver, w.accountTree.Root())
 			w.ch <- witness
 		}
+		wg.Wait()
 		startBatchMum = endBatchNum
 	}
+
 	close(w.ch)
 	<-w.quit
 	// fmt.Println("cex assets info is ", w.cexAssets)
