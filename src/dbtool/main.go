@@ -10,7 +10,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/query"
 	"github.com/binance/zkmerkle-proof-of-solvency/src/dbtool/config"
 	"github.com/binance/zkmerkle-proof-of-solvency/src/prover/prover"
 	"github.com/binance/zkmerkle-proof-of-solvency/src/userproof/model"

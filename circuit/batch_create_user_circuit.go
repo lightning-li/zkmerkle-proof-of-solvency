@@ -1,7 +1,6 @@
 package circuit
 
 import (
-
 	"github.com/binance/zkmerkle-proof-of-solvency/src/utils"
 	"github.com/consensys/gnark/std/hash/poseidon"
 
@@ -326,6 +325,10 @@ func SetBatchCreateUserCircuitWitness(batchWitness *utils.BatchCreateUserWitness
 	}
 
 	cexAssetsCount := len(witness.BeforeCexAssets)
+	// Decide the assets count for user according to the first user,
+	// because the assets count for all users in a batch are the same
+	// and the rest of the users in the batch may be padding accounts
+	targetCounts := GetAssetsCountOfUser(batchWitness.CreateUserOps[0].Assets)
 	for i := 0; i < len(witness.CreateUserOps); i++ {
 		witness.CreateUserOps[i].BeforeAccountTreeRoot = batchWitness.CreateUserOps[i].BeforeAccountTreeRoot
 		witness.CreateUserOps[i].AfterAccountTreeRoot = batchWitness.CreateUserOps[i].AfterAccountTreeRoot
@@ -348,15 +351,7 @@ func SetBatchCreateUserCircuitWitness(batchWitness *utils.BatchCreateUserWitness
 				existingKeys = append(existingKeys, int(u.Index))
 			}
 		}
-		paddingCounts := 0
-		targetCounts := 0
-		for _, v := range utils.AssetCountsTiers {
-			if len(existingKeys) <= v {
-				paddingCounts = v - len(existingKeys)
-				targetCounts = v
-				break
-			}
-		}
+		paddingCounts := targetCounts - len(existingKeys)
 		witness.CreateUserOps[i].Assets = make([]UserAssetInfo, targetCounts)
 		currentPaddingCounts := 0
 		currentAssetIndex := 0
@@ -412,4 +407,21 @@ func isAssetEmpty(ua *utils.AccountAsset) bool {
 		return true
 	}
 	return false
+}
+
+func GetAssetsCountOfUser(assets []utils.AccountAsset) int {
+	count := 0
+	targetCounts := 0
+	for _, v := range assets {
+		if (!isAssetEmpty(&v)) {
+			count += 1
+		}
+	}
+	for _, v := range utils.AssetCountsTiers {
+		if count <= v {
+			targetCounts = v
+			break
+		}
+	}
+	return targetCounts
 }

@@ -97,10 +97,12 @@ def generate_data(id, num, invalid_num):
                         real_content.extend([str(equity), str(debt_token_num), str(equity - debt_token_num), str(vl_token), str(m_token), str(pm_token)])
             
         else:
+            target_tokens_count = total_tokens
             debt_value = 0
-            for p in token_names:
+            for p in range(target_tokens_count):
+                token_name = token_names[p]
                 roundPrecision = 8
-                if p in SpecialToken:
+                if token_name in SpecialToken:
                     roundPrecision = 2
                 equity = round(random.uniform(0, 1000), roundPrecision)
                 vl_token = round(equity / 2, roundPrecision)
