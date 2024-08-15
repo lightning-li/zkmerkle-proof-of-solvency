@@ -126,9 +126,8 @@ func (w *Witness) Run() {
 		workersNum = cpuCores - 2
 	}
 
-
 	userOpsPerBatch := 0
-	startBatchMum := 0
+	startBatchNum := 0
 	recoveredBatchNum := int(height)
 	for p, k := range w.batchNumberMappingKeys {
 		var wg sync.WaitGroup
@@ -139,27 +138,25 @@ func (w *Witness) Run() {
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
-				for j := startBatchMum; j < endBatchNum; j++ {
+				for j := startBatchNum; j < endBatchNum; j++ {
 					if j <= recoveredBatchNum {
 						continue
 					}
-					
 					if index*averageCount >= userOpsPerBatch {
 						break
 					}
-					lowAccountIndex := index*averageCount + (j-startBatchMum)*userOpsPerBatch
+					lowAccountIndex := index*averageCount + (j-startBatchNum)*userOpsPerBatch
 					highAccountIndex := averageCount + lowAccountIndex
 					if highAccountIndex > (j+1) * userOpsPerBatch {
 						highAccountIndex = (j+1) * userOpsPerBatch
 					}
-					currentAccountIndex := j * userOpsPerBatch
+					currentAccountIndex := (j-startBatchNum) * userOpsPerBatch
 					// fmt.Printf("worker num: %d, lowAccountInde: %d, highAccountIndex: %d, current: %d\n", index, lowAccountIndex, highAccountIndex, currentAccountIndex)
 					w.ComputeAccountHash(k, uint32(lowAccountIndex), uint32(highAccountIndex), uint32(currentAccountIndex))
 				}
 			}(i)
 		}
-			
-		for i := startBatchMum; i < endBatchNum; i++ {
+		for i := startBatchNum; i < endBatchNum; i++ {
 			if i <= recoveredBatchNum {
 				continue
 			}
@@ -179,7 +176,7 @@ func (w *Witness) Run() {
 			batchCreateUserWit.BeforeCEXAssetsCommitment = poseidonHasher.Sum(nil)
 			poseidonHasher.Reset()
 
-			relativeBatchNum := i - startBatchMum
+			relativeBatchNum := i - startBatchNum
 			for j := relativeBatchNum * userOpsPerBatch; j < (relativeBatchNum+1)*userOpsPerBatch; j++ {
 				w.ExecuteBatchCreateUser(k, uint32(j), uint32(relativeBatchNum * userOpsPerBatch), batchCreateUserWit)
 			}
@@ -220,7 +217,7 @@ func (w *Witness) Run() {
 			w.ch <- witness
 		}
 		wg.Wait()
-		startBatchMum = endBatchNum
+		startBatchNum = endBatchNum
 	}
 
 	close(w.ch)
