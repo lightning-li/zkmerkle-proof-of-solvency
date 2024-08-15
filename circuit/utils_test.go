@@ -124,6 +124,7 @@ func TestMockCollateralCircuit(t *testing.T) {
 	circuit2.UAssetMataInfo[0].Equity = 0
 	circuit2.UAssetMataInfo[0].Debt = 0
 	circuit2.UAssetMataInfo[0].VipLoanCollateral = 9000
+	circuit2.UAssetInfo[0].AssetIndex = 0
 	circuit2.UAssetInfo[0].VipLoanCollateralIndex = 0
 	circuit2.UAssetInfo[0].VipLoanCollateralFlag = 0
 	circuit2.ExpectedVipLoanCollateral[0] = 9000
@@ -141,6 +142,7 @@ func TestMockCollateralCircuit(t *testing.T) {
 	circuit2.UAssetMataInfo[1].Equity = 0
 	circuit2.UAssetMataInfo[1].Debt = 0
 	circuit2.UAssetMataInfo[1].VipLoanCollateral = 100001
+	circuit2.UAssetInfo[1].AssetIndex = 1
 	circuit2.UAssetInfo[1].VipLoanCollateralIndex = 9
 	circuit2.UAssetInfo[1].VipLoanCollateralFlag = 1
 	circuit2.ExpectedVipLoanCollateral[1] = 55000
@@ -156,7 +158,10 @@ func TestMockCollateralCircuit(t *testing.T) {
 	circuit2.ExpectedPortfolioMarginCollateral[1] = 154400
 
 
-	witness, _ := frontend.NewWitness(&circuit2, ecc.BN254.ScalarField())
+	witness, err := frontend.NewWitness(&circuit2, ecc.BN254.ScalarField())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// err = oR1cs.IsSolved(witness)
 	// if err != nil {
 	// 	t.Fatal(err)
@@ -361,7 +366,7 @@ func TestMockUserCircuit(t *testing.T) {
 // 5. This can be ensured by random linear combination. First, generate a commitment based on the 350 types of assets and the 50 AssetIndexes, denoted as H. Generate H^1, H^2, ..., H^350.
 // 6. Then H^Q_0 * R_0 + H^Q_1 * R_1 + ... + H^Q_49 *R _49 = H^1*A_0 + H^2*A_1 + ... + H^350*A_349, If equal, it can be concluded that the 50 types of assets include information on all non-zero assets among the 350 types.
 
-type MockRyanCircuit struct {
+type MockRandomLinearCombinationCircuit struct {
 	A []Variable  // AssetIndex
 	ExpectedA []Variable
 	B []Variable  // UserAssets
@@ -382,7 +387,7 @@ func CalculatePower(mod *big.Int, in []*big.Int, out []*big.Int) error {
 }
 
 
-func (circuit MockRyanCircuit) Define(api API) error {
+func (circuit MockRandomLinearCombinationCircuit) Define(api API) error {
 	t0 := logderivlookup.New(api)
 	
 	for i := 0; i < len(circuit.B); i++ {
@@ -437,8 +442,8 @@ func (circuit MockRyanCircuit) Define(api API) error {
 	return nil
 }
 
-func TestMockRyanCircuit(t *testing.T) {
-	var circuit MockRyanCircuit
+func TestMockRandomLinearCombinationCircuit(t *testing.T) {
+	var circuit MockRandomLinearCombinationCircuit
 	circuit.A = make([]frontend.Variable, 50)
 	circuit.ExpectedA = make([]frontend.Variable, 50*5)
 	circuit.B = make([]frontend.Variable, 350*5)
@@ -449,7 +454,7 @@ func TestMockRyanCircuit(t *testing.T) {
 	}
 	fmt.Println("constraints number is ", oR1cs.GetNbConstraints())
 
-	var circuit2 MockRyanCircuit
+	var circuit2 MockRandomLinearCombinationCircuit
 	circuit2.A = make([]frontend.Variable, 50)
 	for i := 0; i < len(circuit2.A); i++ {
 		circuit2.A[i] = 7*i

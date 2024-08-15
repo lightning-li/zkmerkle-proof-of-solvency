@@ -21,7 +21,7 @@ var (
 	ZeroBigInt                    = new(big.Int).SetInt64(0)
 	OneBigInt                     = new(big.Int).SetInt64(1)
 	PercentageMultiplier          = new(big.Int).SetUint64(100)
-	MaxTierBoundaryValue, _       = new(big.Int).SetString("340282366920938463463374607431768211455", 10) // (pow(2,128)-1)
+	MaxTierBoundaryValue, _       = new(big.Int).SetString("332306998946228968225951765070086144", 10) // (pow(2,118))
 	Uint64MaxValueBigInt, _       = new(big.Int).SetString("18446744073709551616", 10)
 	Uint64MaxValueBigIntSquare, _ = new(big.Int).SetString("340282366920938463463374607431768211456", 10)
 	Uint8MaxValueBigInt, _        = new(big.Int).SetString("256", 10)

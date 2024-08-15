@@ -21,7 +21,8 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/backend/groth16"
-	// "os"
+	"os"
+	"encoding/hex"
 )
 
 
@@ -121,6 +122,84 @@ func TestBatchCreateUserCircuit(t *testing.T) {
 		fmt.Println("verify")
 	}
 
+}
+
+func TestBatchCreateUserCircuitFromFile(t *testing.T) {
+	targetAssetCounts := 30
+	totalAssetsCount := 350
+	userOpsPerBatch := 1
+	targetCircuitAssetCounts := 0
+	for _, v := range utils.AssetCountsTiers {
+		if targetAssetCounts <= v {
+			targetCircuitAssetCounts = v
+			break
+		}
+	}
+	userCircuit := NewBatchCreateUserCircuit(uint32(targetCircuitAssetCounts), uint32(totalAssetsCount), uint32(userOpsPerBatch))
+	s := time.Now()
+	oR1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, userCircuit, frontend.IgnoreUnconstrainedInputs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	et := time.Now()
+	fmt.Println("compile time is ", et.Sub(s))
+	fmt.Println("batch create user constraints number is ", oR1cs.GetNbConstraints())
+
+	userCircuit = ConstructBatchFromFile("witness.log")
+	solver.RegisterHint(IntegerDivision)
+	witness, e := frontend.NewWitness(userCircuit, ecc.BN254.ScalarField())
+	if witness == nil {
+		t.Fatal(e)
+		t.Fatal("witness is nil")
+	}
+	// err = oR1cs.IsSolved(witness)
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	pk, vk, err := groth16.Setup(oR1cs)
+	if err != nil {
+		panic(err)
+	} else {
+		fmt.Println("setup done")
+	}
+	publicWitness, err := witness.Public()
+	if err != nil {
+		panic(err)
+	} else {
+		fmt.Println("public witness")
+	}
+	startTime := time.Now()
+	proof, err := groth16.Prove(oR1cs, pk, witness)
+	if err != nil {
+		panic(err)
+	} else {
+		fmt.Println("proof")
+	}
+	endTime := time.Now()
+	fmt.Println("prove time is ", endTime.Sub(startTime))
+	err = groth16.Verify(proof, vk, publicWitness)
+	if err != nil {
+		panic(err)
+	} else {
+		fmt.Println("verify")
+	}
+}
+
+func ConstructBatchFromFile(fileName string) (witness *BatchCreateUserCircuit) {
+	witnessFile, err := os.ReadFile(fileName)
+	if err != nil {
+		panic(err.Error())
+	}
+	witnessData := make([]byte, hex.DecodedLen(len(witnessFile)))
+	n, err := hex.Decode(witnessData, witnessFile)
+	if err != nil {
+		panic(err.Error())
+	}
+	witnessData = witnessData[:n]
+
+	witnessForCircuit := utils.DecodeBatchWitness(string(witnessData[:]))
+	circuitWitness, _ := SetBatchCreateUserCircuitWitness(witnessForCircuit)
+	return circuitWitness
 }
 
 func ConstructValidBatch(assetsCount int, totalAssetsCount int, userOpsPerBatch int) (witness *BatchCreateUserCircuit) {

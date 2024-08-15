@@ -206,6 +206,7 @@ func (p *Prover) Run(flag bool) {
 		proof, err := GenerateAndVerifyProof(p.R1cs, p.ProvingKeys, p.VerifyingKeys, witnessForCircuit, p.SessionName, batchWitness.Height)
 		if err != nil {
 			fmt.Println("generate and verify proof error:", err.Error())
+			return
 		}
 		var buf bytes.Buffer
 		_, err = proof.WriteRawTo(&buf)
