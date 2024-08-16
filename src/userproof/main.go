@@ -40,6 +40,7 @@ type AccountLeave struct {
 
 func ComputeAccountRootHash(userProofConfig *config.Config) {
 	accountTree, err := utils.NewAccountTree("memory", "")
+	fmt.Printf("empty accountTree root is %x\n", accountTree.Root())
 	if err != nil {
 		panic(err.Error())
 	}

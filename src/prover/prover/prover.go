@@ -182,6 +182,7 @@ func (p *Prover) Run(flag bool) {
 			CexAssetListCommitments: string(cexAssetListCommitmentsSerial),
 			AccountTreeRoots:        string(accountTreeRootsSerial),
 			BatchCommitment:         base64.StdEncoding.EncodeToString(witnessForCircuit.BatchCommitment),
+			AssetsCount:             len(witnessForCircuit.CreateUserOps[0].Assets),
 		}
 		err = p.proofModel.CreateProof(row)
 		if err != nil {
@@ -299,6 +300,9 @@ func (p *Prover) LoadSnarkParamsOnce(targerAssetsCount int) {
 	fmt.Println("begin loading verifying key of ", targerAssetsCount, " assets")
 	s = time.Now()
 	vkFromFile, err := os.ReadFile(p.SessionName[index] + ".vk")
+	if err != nil {
+		panic("verifyingKey file load error:" + err.Error())
+	}
 	buf = bytes.NewBuffer(vkFromFile)
 	p.VerifyingKey = groth16.NewVerifyingKey(ecc.BN254)
 	n, err = p.VerifyingKey.ReadFrom(buf)
