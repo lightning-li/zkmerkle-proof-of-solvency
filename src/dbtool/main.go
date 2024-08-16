@@ -38,6 +38,7 @@ func main() {
 	remotePasswdConfig := flag.String("remote_password_config", "", "fetch password from aws secretsmanager")
 	queryCexAssetsConfig := flag.Bool("query_cex_assets", false, "query cex assets info")
 	queryWitnessData := flag.Int("query_witness_data", -1, "query witness data by height")
+	queryAccountData := flag.Int("query_account_data", -1, "query account data by index")
 
 	flag.Parse()
 
@@ -166,5 +167,21 @@ func main() {
 			panic(err.Error())
 		}
 		fmt.Printf("%x", w.WitnessData)
+	}
+
+	if *queryAccountData != -1 {
+		db, err := gorm.Open(mysql.Open(dbtoolConfig.MysqlDataSource), &gorm.Config{
+			Logger: newLogger,
+		})
+		if err != nil {
+			panic(err.Error())
+		}
+		userProofModel := model.NewUserProofModel(db, dbtoolConfig.DbSuffix)
+
+		u, err := userProofModel.GetUserProofByIndex(uint32(*queryAccountData))
+		if err != nil {
+			panic(err.Error())
+		}
+		fmt.Println(u.Config)
 	}
 }

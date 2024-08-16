@@ -146,7 +146,7 @@ func (p *Prover) Run(flag bool) {
 			fmt.Println("marshal account tree root failed: ", err.Error())
 			return
 		}
-		proof, err := p.GenerateAndVerifyProof(witnessForCircuit, batchWitness.Height)
+		proof, assetsCount, err := p.GenerateAndVerifyProof(witnessForCircuit, batchWitness.Height)
 		if err != nil {
 			fmt.Println("generate and verify proof error:", err.Error())
 			return
@@ -182,7 +182,7 @@ func (p *Prover) Run(flag bool) {
 			CexAssetListCommitments: string(cexAssetListCommitmentsSerial),
 			AccountTreeRoots:        string(accountTreeRootsSerial),
 			BatchCommitment:         base64.StdEncoding.EncodeToString(witnessForCircuit.BatchCommitment),
-			AssetsCount:             len(witnessForCircuit.CreateUserOps[0].Assets),
+			AssetsCount:             assetsCount,
 		}
 		err = p.proofModel.CreateProof(row)
 		if err != nil {
@@ -199,7 +199,7 @@ func (p *Prover) Run(flag bool) {
 func (p *Prover) GenerateAndVerifyProof(
 	batchWitness *utils.BatchCreateUserWitness,
 	batchNumber int64,
-) (proof groth16.Proof, err error) {
+) (proof groth16.Proof, assetsCount int, err error) {
 	startTime := time.Now().UnixMilli()
 	fmt.Println("begin to generate proof for batch: ", batchNumber)
 	circuitWitness, _ := circuit.SetBatchCreateUserCircuitWitness(batchWitness)
@@ -208,27 +208,27 @@ func (p *Prover) GenerateAndVerifyProof(
 	verifyWitness := circuit.NewVerifyBatchCreateUserCircuit(batchWitness.BatchCommitment)
 	witness, err := frontend.NewWitness(circuitWitness, ecc.BN254.ScalarField())
 	if err != nil {
-		return proof, err
+		return proof, 0, err
 	}
 
 	vWitness, err := frontend.NewWitness(verifyWitness, ecc.BN254.ScalarField(), frontend.PublicOnly())
 	if err != nil {
-		return proof, err
+		return proof, 0, err
 	}
 	proof, err = groth16.Prove(p.R1cs, p.ProvingKey, witness)
 	if err != nil {
-		return proof, err
+		return proof, 0, err
 	}
 	endTime := time.Now().UnixMilli()
 	fmt.Println("proof generation cost ", endTime-startTime, " ms")
 
 	err = groth16.Verify(proof, p.VerifyingKey, vWitness)
 	if err != nil {
-		return proof, err
+		return proof, 0, err
 	}
 	endTime2 := time.Now().UnixMilli()
 	fmt.Println("proof verification cost ", endTime2-endTime, " ms")
-	return proof, nil
+	return proof, len(verifyWitness.CreateUserOps[0].Assets), nil
 }
 
 func (p *Prover) LoadSnarkParamsOnce(targerAssetsCount int) {

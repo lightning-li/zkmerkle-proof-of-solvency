@@ -702,7 +702,12 @@ func ComputeCexAssetsCommitment(cexAssetsInfo []CexAssetInfo) []byte {
 	hasher := poseidon.NewPoseidon()
 	emptyCexAssets := make([]CexAssetInfo, AssetCounts-len(cexAssetsInfo))
 	for i := len(cexAssetsInfo); i < AssetCounts; i++ {
-		emptyCexAssets[i-len(cexAssetsInfo)] = CexAssetInfo{
+		emptyCexAssets[i-len(cexAssetsInfo)] = CexAssetInfo {
+			Symbol: "reserved",
+			BasePrice: 0,
+			VipLoanRatios: PaddingTierRatios([]TierRatio{}),
+			MarginRatios: PaddingTierRatios([]TierRatio{}),
+			PortfolioMarginRatios: PaddingTierRatios([]TierRatio{}),
 			Index: uint32(i),
 		}
 	}

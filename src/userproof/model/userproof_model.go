@@ -76,6 +76,7 @@ func (m *defaultUserProofModel) CreateUserProofs(rows []UserProof) error {
 }
 
 func (m *defaultUserProofModel) GetUserProofByIndex(id uint32) (userproof *UserProof, err error) {
+	userproof = &UserProof{}
 	dbTx := m.DB.Table(m.table).Where("account_index = ?", id).Find(userproof)
 	if dbTx.Error != nil {
 		return nil, dbTx.Error
@@ -86,6 +87,7 @@ func (m *defaultUserProofModel) GetUserProofByIndex(id uint32) (userproof *UserP
 }
 
 func (m *defaultUserProofModel) GetUserProofById(id string) (userproof *UserProof, err error) {
+	userproof = &UserProof{}
 	dbTx := m.DB.Table(m.table).Where("account_id = ?", id).Find(userproof)
 	if dbTx.Error != nil {
 		return nil, dbTx.Error
