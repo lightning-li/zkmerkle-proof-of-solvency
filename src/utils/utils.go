@@ -294,7 +294,7 @@ func PaddingTierRatios(tiersRatio []TierRatio) (res [TierCount]TierRatio) {
 }
 
 func ParseTiersRatioFromStr(tiersRatioEnc string) ([TierCount]TierRatio, error) {
-	// tiersRatioEnc = strings.Trim(tiersRatioEnc, "[]")
+	tiersRatioEnc = strings.Trim(tiersRatioEnc, "[]")
 	if len(tiersRatioEnc) == 0 {
 		return PaddingTierRatios([]TierRatio{}), nil
 	}
@@ -302,7 +302,7 @@ func ParseTiersRatioFromStr(tiersRatioEnc string) ([TierCount]TierRatio, error) 
 	tiersRatio := make([]TierRatio, 0, 10)
 	valueMultiplier := new(big.Int).SetUint64(10000000000000000)
 	for i := 0; i < len(tiersRatioStrs); i += 1 {
-		tmpTierRatio := strings.Split(tiersRatioStrs[i], ":")
+		tmpTierRatio := strings.Split(strings.Trim(tiersRatioStrs[i], " "), ":")
 		rangeValues := strings.Split(tmpTierRatio[0], "-")
 		if len(tmpTierRatio) != 2 || len(rangeValues) != 2 {
 			return PaddingTierRatios([]TierRatio{}), errors.New("tiers ratio data wrong")
@@ -329,6 +329,9 @@ func ParseTiersRatioFromStr(tiersRatioEnc string) ([TierCount]TierRatio, error) 
 		if boundaryValueBigInt.Cmp(lowBoundaryValueBigInt) < 0 {
 			return PaddingTierRatios([]TierRatio{}), errors.New("tiers boundry value data wrong")
 		}
+		if boundaryValueBigInt.Cmp(MaxTierBoundaryValue) > 0 {
+			return PaddingTierRatios([]TierRatio{}), errors.New("tiers boundry value data wrong")
+		}
 		tiersRatio = append(tiersRatio, TierRatio{
 			BoundaryValue: boundaryValueBigInt,
 			Ratio:         uint8(ratio),
@@ -336,7 +339,6 @@ func ParseTiersRatioFromStr(tiersRatioEnc string) ([TierCount]TierRatio, error) 
 	}
 	CalculatePrecomputedValue(tiersRatio)
 	return PaddingTierRatios(tiersRatio), nil
-
 }
 
 func CalculatePrecomputedValue(tiersRatio []TierRatio) {

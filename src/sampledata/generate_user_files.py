@@ -36,10 +36,10 @@ def read_cex_data(file_name):
 def parse_tiers_ratio_data(data):
     if len(data) == 0:
         return []
-    data = data.split(",")
+    data = data.strip("[]").split(",")
     boundary2ratio = []
     for d in data:
-        d = d.split(":")
+        d = d.strip(" ").split(":")
         boundary2ratio.append([int(d[0].split("-")[1])*TokenValueMultiplier, int(d[1])])
     return boundary2ratio
 
