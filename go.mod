@@ -82,7 +82,6 @@ require (
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
 	go.uber.org/automaxprocs v1.5.2 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
-	golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
@@ -95,6 +94,6 @@ require (
 )
 
 replace (
-	github.com/consensys/gnark => github.com/lightning-li/gnark v0.10.1-0.20240813011322-8ee8b4ea6814
-	github.com/consensys/gnark-crypto => github.com/lightning-li/gnark-crypto v0.12.2-0.20240813075517-7c1878dae9fa
+	github.com/consensys/gnark => github.com/bnb-chain/gnark v0.10.1-0.20240813011322-8ee8b4ea6814
+	github.com/consensys/gnark-crypto => github.com/bnb-chain/gnark-crypto v0.12.2-0.20240813075517-7c1878dae9fa
 )
