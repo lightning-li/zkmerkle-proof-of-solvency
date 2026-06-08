@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/binance/zkmerkle-proof-of-solvency/src/dbtool/config"
@@ -40,6 +42,7 @@ func main() {
 	queryAccountData := flag.Int("query_account_data", -1, "query account data by index")
 	pushTaskToRedis := flag.Bool("push_task_to_redis", false, "push task to redis")
 	exportProofCSV := flag.String("export_proof_csv", "", "export proof table to csv file")
+	queryRerunTasks := flag.Bool("query_rerun_tasks", false, "list witnesses without a proof and which prover (ip) fetched them")
 
 	flag.Parse()
 
@@ -91,8 +94,8 @@ func main() {
 
 		// clear redis data
 		client := redis.NewClient(&redis.Options{
-			Addr:            dbtoolConfig.Redis.Host,
-			Password:        dbtoolConfig.Redis.Password,
+			Addr:     dbtoolConfig.Redis.Host,
+			Password: dbtoolConfig.Redis.Password,
 		})
 		client.FlushAll(context.Background())
 		fmt.Println("redis data drop successfully")
@@ -217,7 +220,7 @@ func main() {
 		taskQueueName := "por_batch_task_queue_" + dbtoolConfig.DbSuffix
 		ctx := context.Background()
 		redisCli := redis.NewClient(&redis.Options{
-			Addr: dbtoolConfig.Redis.Host,
+			Addr:     dbtoolConfig.Redis.Host,
 			Password: dbtoolConfig.Redis.Password,
 		})
 		for _, status := range witessStatusList {
@@ -296,5 +299,79 @@ func main() {
 			panic(err.Error())
 		}
 		fmt.Printf("exported %d proofs to %s\n", len(proofs), *exportProofCSV)
+	}
+
+	if *queryRerunTasks {
+		db, err := gorm.Open(mysql.Open(dbtoolConfig.MysqlDataSource), &gorm.Config{
+			Logger: newLogger,
+		})
+		if err != nil {
+			panic(err.Error())
+		}
+		witnessModel := witness.NewWitnessModel(db, dbtoolConfig.DbSuffix)
+
+		// Witnesses not yet Finished are exactly the tasks the offline rerun will
+		// pick up. Collect Received first then Published, mirroring the rerun order.
+		var heights []int64
+		for _, status := range []int64{witness.StatusReceived, witness.StatusPublished} {
+			offset := 0
+			limit := 4096
+			for {
+				hs, err := witnessModel.GetAllBatchHeightsByStatus(status, limit, offset)
+				if err == utils.DbErrQueryInterrupted || err == utils.DbErrQueryTimeout {
+					fmt.Println("get witness heights timeout, retry...:", err.Error())
+					time.Sleep(1 * time.Second)
+					continue
+				}
+				if err == utils.DbErrNotFound {
+					break
+				}
+				if err != nil {
+					panic(err.Error())
+				}
+				heights = append(heights, hs...)
+				offset += len(hs)
+			}
+		}
+
+		fmt.Printf("there are %d task(s) without a proof (need rerun)\n", len(heights))
+		if len(heights) == 0 {
+			return
+		}
+
+		// Look up the per-height ledger written by the cluster provers to attribute
+		// each unfinished height to the prover (ip) that fetched it and the stage reached.
+		ctx := context.Background()
+		redisCli := redis.NewClient(&redis.Options{
+			Addr:     dbtoolConfig.Redis.Host,
+			Password: dbtoolConfig.Redis.Password,
+		})
+		ledgerKey := "por_inflight_" + dbtoolConfig.DbSuffix
+		fields := make([]string, len(heights))
+		for i, h := range heights {
+			fields[i] = strconv.FormatInt(h, 10)
+		}
+		vals, err := redisCli.HMGet(ctx, ledgerKey, fields...).Result()
+		if err != nil {
+			fmt.Println("query redis ledger failed:", err.Error())
+			vals = make([]interface{}, len(heights))
+		}
+
+		fmt.Println("height\tprover_ip\tstage\tfetched_at")
+		for i, h := range heights {
+			ip, stage, fetchedAt := "-", "not_fetched", "-"
+			if v, ok := vals[i].(string); ok && v != "" {
+				// value format written by prover.markStage: "ip,unix_ms,stage"
+				parts := strings.SplitN(v, ",", 3)
+				if len(parts) == 3 {
+					ip = parts[0]
+					stage = parts[2]
+					if ms, perr := strconv.ParseInt(parts[1], 10, 64); perr == nil {
+						fetchedAt = time.UnixMilli(ms).Format("2006-01-02 15:04:05")
+					}
+				}
+			}
+			fmt.Printf("%d\t%s\t%s\t%s\n", h, ip, stage, fetchedAt)
+		}
 	}
 }

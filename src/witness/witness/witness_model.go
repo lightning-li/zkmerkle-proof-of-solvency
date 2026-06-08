@@ -101,10 +101,10 @@ func (m *defaultWitnessModel) GetLatestBatchWitnessByStatus(status int64) (witne
 }
 
 func (m *defaultWitnessModel) GetAndUpdateBatchesWitnessByStatus(beforeStatus, afterStatus int64, count int32) (witness [](*BatchWitness), err error) {
-	
+
 	err = m.DB.Table(m.table).Transaction(func(tx *gorm.DB) error {
 		// dbTx := tx.Where("status = ?", beforeStatus).Limit(int(count)).Clauses(clause.Locking{Strength: "UPDATE",  Options: "SKIP LOCKED"}).Find(&witness)
-		dbTx := tx.Clauses(utils.MaxExecutionTimeHint).Debug().Where("status = ?", beforeStatus).Order("height asc").Limit(int(count)).Clauses(clause.Locking{Strength: "UPDATE", }).Find(&witness)
+		dbTx := tx.Clauses(utils.MaxExecutionTimeHint).Debug().Where("status = ?", beforeStatus).Order("height asc").Limit(int(count)).Clauses(clause.Locking{Strength: "UPDATE"}).Find(&witness)
 
 		if dbTx.Error != nil {
 			return utils.ConvertMysqlErrToDbErr(dbTx.Error)
@@ -177,7 +177,7 @@ func (m *defaultWitnessModel) CreateBatchWitness(witness []BatchWitness) error {
 }
 
 func (m *defaultWitnessModel) GetAllBatchHeightsByStatus(status int64, limit int, offset int) (witnessHeights []int64, err error) {
-	dbTx := m.DB.Clauses(utils.MaxExecutionTimeHint).Table(m.table).Debug().Select("height").Where("status = ?", status).Offset(offset).Limit(limit).Find(&witnessHeights)
+	dbTx := m.DB.Clauses(utils.MaxExecutionTimeHint).Table(m.table).Debug().Select("height").Where("status = ?", status).Order("height asc").Offset(offset).Limit(limit).Find(&witnessHeights)
 	if dbTx.Error != nil {
 		return nil, utils.ConvertMysqlErrToDbErr(dbTx.Error)
 	} else if dbTx.RowsAffected == 0 {

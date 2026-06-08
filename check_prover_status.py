@@ -7,6 +7,14 @@ def get_delta():
     p = subprocess.run(["go", "run", "main.go", "-check_prover_status"], stdout=subprocess.PIPE)
     return int(p.stdout.strip().split(b"\n")[-1])
 
+def print_rerun_tasks():
+    # Print which prover (ip) fetched each task that still has no proof, and the
+    # stage it reached, so the cause of the rerun can be analyzed.
+    p = subprocess.run(["go", "run", "main.go", "-query_rerun_tasks"], stdout=subprocess.PIPE)
+    print("==== rerun task attribution ====", flush=True)
+    print(p.stdout.decode(errors="replace"), flush=True)
+    print("================================", flush=True)
+
 def rerun():
     process = subprocess.Popen(["go", "run", "main.go", "-rerun"], stdout=subprocess.PIPE)
     while True:
@@ -39,6 +47,7 @@ if __name__ == "__main__":
         if cur_delta == prev_delta:
             print("there is no new proof generate in 8 minutes, it means all prover finished running", flush=True)
             print("there are ", cur_delta, " proofs need to rerun", flush=True)
+            print_rerun_tasks()
             os.chdir("../prover")
             rerun()
             os.chdir("../dbtool")

@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/binance/zkmerkle-proof-of-solvency/circuit"
@@ -32,14 +35,17 @@ type Prover struct {
 	proofModel   ProofModel
 	redisCli     *redis.Client
 
-	VerifyingKey groth16.VerifyingKey
-	ProvingKey   groth16.ProvingKey
-	SessionName   []string
-	AssetsCountTiers    []int
-	R1cs          constraint.ConstraintSystem
+	VerifyingKey     groth16.VerifyingKey
+	ProvingKey       groth16.ProvingKey
+	SessionName      []string
+	AssetsCountTiers []int
+	R1cs             constraint.ConstraintSystem
 
 	CurrentSnarkParamsInUse int
-	TaskQueueName string
+	TaskQueueName           string
+
+	ip       string
+	DbSuffix string
 }
 
 func NewProver(config *config.Config) *Prover {
@@ -49,24 +55,59 @@ func NewProver(config *config.Config) *Prover {
 	}
 	// Set up the redis client.
 	redisCli := redis.NewClient(&redis.Options{
-		Addr:    config.Redis.Host,
+		Addr:     config.Redis.Host,
 		Password: config.Redis.Password,
 	})
 	taskQueueName := "por_batch_task_queue_" + config.DbSuffix
 
 	prover := Prover{
-		witnessModel: witness.NewWitnessModel(db, config.DbSuffix),
-		proofModel:   NewProofModel(db, config.DbSuffix),
-		redisCli:     redisCli,
-		SessionName:  config.ZkKeyName,
-		AssetsCountTiers:  config.AssetsCountTiers,
+		witnessModel:            witness.NewWitnessModel(db, config.DbSuffix),
+		proofModel:              NewProofModel(db, config.DbSuffix),
+		redisCli:                redisCli,
+		SessionName:             config.ZkKeyName,
+		AssetsCountTiers:        config.AssetsCountTiers,
 		CurrentSnarkParamsInUse: 0,
-		TaskQueueName: taskQueueName,
+		TaskQueueName:           taskQueueName,
+		ip:                      getLocalIP(),
+		DbSuffix:                config.DbSuffix,
 	}
 
 	// std.RegisterHints()
 	solver.RegisterHint(circuit.IntegerDivision)
 	return &prover
+}
+
+// getLocalIP returns the first non-loopback IPv4 address of the host, used to
+// attribute fetched batch heights to a specific prover machine in the redis ledger.
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "unknown"
+	}
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	return "unknown"
+}
+
+// markStage records, in a redis hash, which prover (ip) handled which batch height
+// and the stage it reached (popped -> claimed -> done). It is best-effort: failures
+// only log and never block proof generation. A 7-day TTL is (re)set on every write so
+// the ledger self-cleans well before the next run reuses the same DbSuffix.
+func (p *Prover) markStage(ledgerKey string, height int64, stage string) {
+	ctx := context.Background()
+	val := fmt.Sprintf("%s,%d,%s", p.ip, time.Now().UnixMilli(), stage)
+	pipe := p.redisCli.Pipeline()
+	pipe.HSet(ctx, ledgerKey, height, val)
+	pipe.Expire(ctx, ledgerKey, 7*24*time.Hour)
+	if _, err := pipe.Exec(ctx); err != nil {
+		fmt.Printf("[ledger] mark failed key=%s ip=%s height=%d stage=%s: %v\n",
+			ledgerKey, p.ip, height, stage, err)
+		return
+	}
+	fmt.Printf("[ledger] ip=%s height=%d stage=%s\n", p.ip, height, stage)
 }
 
 func (p *Prover) fetchTasksByRedis() (int, error) {
@@ -80,13 +121,20 @@ func (p *Prover) fetchTasksByRedis() (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	// Record the pop before attempting to claim the witness in the DB, so that a
+	// failure between here and the status update (witness stuck in Published) is
+	// still attributable to this prover.
+	p.markStage("por_inflight_"+p.DbSuffix, int64(batchHeight), "popped")
 	return batchHeight, nil
 }
 
-func (p *Prover) FetchBatchWitness() ([]*witness.BatchWitness, error) {
+// FetchBatchWitness returns the claimed witnesses and the batch height popped from
+// the task queue. The height is returned even on error (-1 if no height was popped)
+// so the caller can attribute a claim failure to a specific batch.
+func (p *Prover) FetchBatchWitness() ([]*witness.BatchWitness, int, error) {
 	batchHeight, err := p.fetchTasksByRedis()
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 
 	// Fetch unproved block witness.
@@ -98,9 +146,9 @@ func (p *Prover) FetchBatchWitness() ([]*witness.BatchWitness, error) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, batchHeight, err
 		}
-		return blockWitnesses, nil
+		return blockWitnesses, batchHeight, nil
 	}
 }
 
@@ -136,8 +184,31 @@ func (p *Prover) FetchBatchWitnessForRerun() ([]*witness.BatchWitness, error) {
 	return blockWitnesses, nil
 }
 
+// watchShutdownSignals logs a line when the process is asked to terminate via
+// SIGTERM/SIGINT (e.g. graceful eviction or scale-down). This is the key signal
+// for diagnosing rerun causes: if a height is stuck at "claimed" in the ledger AND
+// this shutdown line appears for that ip, the prover was evicted; if NO error and NO
+// shutdown line appears, the process was SIGKILL'd (OOM killer / hard kill), which
+// cannot be caught and whose absence is itself the evidence.
+func (p *Prover) watchShutdownSignals() {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		s := <-sigCh
+		fmt.Printf("[shutdown] ip=%s received signal=%v, exiting\n", p.ip, s)
+		os.Exit(1)
+	}()
+}
+
 func (p *Prover) Run(flag bool) {
+	p.watchShutdownSignals()
 	p.proofModel.CreateProofTable()
+	// Cluster runs and the offline rerun write to separate ledgers so that the
+	// rerun does not overwrite the cluster's failure attribution for a height.
+	ledgerKey := "por_inflight_" + p.DbSuffix
+	if flag {
+		ledgerKey = "por_rerun_" + p.DbSuffix
+	}
 	for {
 		var batchWitnesses []*witness.BatchWitness
 		var err error
@@ -146,7 +217,8 @@ func (p *Prover) Run(flag bool) {
 			// 1. if prover crash before updating witness status to pending, or
 			// 2. if prover crash before generating proof,
 			// then the offline rerun mechanism will be triggered to handle this situation.
-			batchWitnesses, err = p.FetchBatchWitness()
+			var fetchedHeight int
+			batchWitnesses, fetchedHeight, err = p.FetchBatchWitness()
 			if errors.Is(err, utils.DbErrNotFound) {
 				fmt.Println("there is no published status witness in db, so quit")
 				fmt.Println("prover run finish...")
@@ -158,7 +230,9 @@ func (p *Prover) Run(flag bool) {
 				return
 			}
 			if err != nil {
-				fmt.Println("get batch witness failed: ", err.Error())
+				// fetchedHeight is -1 when the pop itself failed (no height claimed),
+				// otherwise it is the height whose claim failed (witness stays Published).
+				fmt.Printf("get batch witness failed, ip=%s, height=%d, err=%s\n", p.ip, fetchedHeight, err.Error())
 				time.Sleep(10 * time.Second)
 				continue
 			}
@@ -176,6 +250,7 @@ func (p *Prover) Run(flag bool) {
 		}
 
 		for _, batchWitness := range batchWitnesses {
+			p.markStage(ledgerKey, batchWitness.Height, "claimed")
 			witnessForCircuit := utils.DecodeBatchWitness(batchWitness.WitnessData)
 			cexAssetListCommitments := make([][]byte, 2)
 			cexAssetListCommitments[0] = witnessForCircuit.BeforeCEXAssetsCommitment
@@ -184,23 +259,23 @@ func (p *Prover) Run(flag bool) {
 			accountTreeRoots[0] = witnessForCircuit.AccountTreeRoot
 			cexAssetListCommitmentsSerial, err := json.Marshal(cexAssetListCommitments)
 			if err != nil {
-				fmt.Println("marshal cex asset list failed: ", err.Error())
+				fmt.Printf("marshal cex asset list failed, ip=%s, height=%d, err=%s\n", p.ip, batchWitness.Height, err.Error())
 				return
 			}
 			accountTreeRootsSerial, err := json.Marshal(accountTreeRoots)
 			if err != nil {
-				fmt.Println("marshal account tree root failed: ", err.Error())
+				fmt.Printf("marshal account tree root failed, ip=%s, height=%d, err=%s\n", p.ip, batchWitness.Height, err.Error())
 				return
 			}
 			proof, assetsCount, err := p.GenerateAndVerifyProof(witnessForCircuit, batchWitness.Height)
 			if err != nil {
-				fmt.Println("generate and verify proof error:", err.Error())
+				fmt.Printf("generate and verify proof error, ip=%s, height=%d, err=%s\n", p.ip, batchWitness.Height, err.Error())
 				return
 			}
 			var buf bytes.Buffer
 			_, err = proof.WriteRawTo(&buf)
 			if err != nil {
-				fmt.Println("proof serialize failed")
+				fmt.Printf("proof serialize failed, ip=%s, height=%d, err=%s\n", p.ip, batchWitness.Height, err.Error())
 				return
 			}
 			proofBytes := buf.Bytes()
@@ -221,6 +296,7 @@ func (p *Prover) Run(flag bool) {
 				if err != nil {
 					fmt.Println("update witness error:", err.Error())
 				}
+				p.markStage(ledgerKey, batchWitness.Height, "done")
 				continue
 			}
 
@@ -236,13 +312,14 @@ func (p *Prover) Run(flag bool) {
 			}
 			err = p.proofModel.CreateProof(row)
 			if err != nil {
-				fmt.Printf("create blockProof of height %d failed\n", batchWitness.Height)
+				fmt.Printf("create blockProof failed, ip=%s, height=%d, err=%s\n", p.ip, batchWitness.Height, err.Error())
 				return
 			}
 			err = p.witnessModel.UpdateBatchWitnessStatus(batchWitness, witness.StatusFinished)
 			if err != nil {
 				fmt.Println("update witness error:", err.Error())
 			}
+			p.markStage(ledgerKey, batchWitness.Height, "done")
 		}
 	}
 }
@@ -286,9 +363,9 @@ func (p *Prover) LoadSnarkParamsOnce(targerAssetsCount int) {
 	if targerAssetsCount == p.CurrentSnarkParamsInUse {
 		return
 	}
-	
+
 	index := -1
-	for i, v :=  range p.AssetsCountTiers {
+	for i, v := range p.AssetsCountTiers {
 		if targerAssetsCount == v {
 			index = i
 			break
@@ -330,7 +407,7 @@ func (p *Prover) LoadSnarkParamsOnce(targerAssetsCount int) {
 	runtime.GC()
 	et := time.Now()
 	fmt.Println("finish loading r1cs.... the time cost is ", et.Sub(s))
-	
+
 	// read proving and verifying keys
 	fmt.Println("begin loading proving key of ", targerAssetsCount, " assets")
 	s = time.Now()
@@ -347,7 +424,7 @@ func (p *Prover) LoadSnarkParamsOnce(targerAssetsCount int) {
 	fmt.Println("proving key read size is ", n)
 	et = time.Now()
 	fmt.Println("finish loading proving key... the time cost is ", et.Sub(s))
-	
+
 	fmt.Println("begin loading verifying key of ", targerAssetsCount, " assets")
 	s = time.Now()
 	vkFromFile, err := os.ReadFile(p.SessionName[index] + ".vk")
