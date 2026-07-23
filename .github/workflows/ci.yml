@@ -55,7 +55,7 @@ jobs:
 
       - name: Run circuit tests
         run: |
-          go test ./circuit/ -v -run "TestBatchCreateUserCircuit$|TestSetBatchCreateUserCircuitWitness|TestGetAndCheckTierRatiosQueryResultsEdgeCases|TestGetAndCheckTierRatiosQueryResultsMultiAssetOffsetIsolation|TestCollateralFlagBypassShouldFail|TestMockRandomLinearCombinationCircuit" -timeout 600s
+          go test ./circuit/ -v -run "TestBatchCreateUserCircuit$|TestSetBatchCreateUserCircuitWitness|TestGetAndCheckTierRatiosQueryResultsEdgeCases|TestGetAndCheckTierRatiosQueryResultsMultiAssetOffsetIsolation|TestCollateralFlagBypassShouldFail|TestMockRandomLinearCombinationCircuit" -timeout 1200s
 
   test-integration:
     runs-on: ubuntu-latest

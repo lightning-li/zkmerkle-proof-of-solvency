@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -73,6 +74,169 @@ func TestBatchCreateUserCircuit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// compileConstraintsForBatch compiles the circuit for a given asset tier and
+// user-per-batch count, returning only the number of r1cs constraints. It does
+// not build a witness, so it is much cheaper than ConstructR1csAndWitness and
+// safe to call repeatedly while probing constraint growth.
+func compileConstraintsForBatch(assetCountsTier int, userOpsPerBatch int) (int, error) {
+	emptyUserCircuit := NewBatchCreateUserCircuit(uint32(assetCountsTier), uint32(utils.AssetCounts), uint32(userOpsPerBatch))
+	oR1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, emptyUserCircuit)
+	if err != nil {
+		return 0, err
+	}
+	return oR1cs.GetNbConstraints(), nil
+}
+
+// TestEstimateUserCapacityPerTier estimates, for every asset tier, how many
+// users a single batch circuit can hold under a target constraint budget
+// (default 2^26, overridable via ZKPOR_CONSTRAINT_BUDGET).
+//
+// The circuit's constraint count is affine in the number of users:
+//
+//	constraints(n) = base + perUser * n
+//
+//	- base:    constraints that do NOT scale with users (cex asset setup,
+//	           tier-ratio lookup tables, commitments, etc.)
+//	- perUser: constraints added by each additional user
+//
+// We recover both by compiling the circuit for n = 1..probeMax users and taking
+// a linear fit. Probing up to 4 (matching the manual procedure) lets us verify
+// the growth is actually linear rather than trusting a single delta. The
+// capacity is then floor((budget - base) / perUser).
+//
+// This test only COMPILES circuits (no setup/prove), but large tiers still take
+// a while, so run it with a generous timeout, e.g.:
+//
+//	go test ./circuit/ -run '^TestEstimateUserCapacityPerTier$' -v -timeout 2h
+func TestEstimateUserCapacityPerTier(t *testing.T) {
+	// constraint budget: 2^26 by default, overridable for experimentation.
+	budget := int64(1) << 26
+	if env := os.Getenv("ZKPOR_CONSTRAINT_BUDGET"); env != "" {
+		parsed, err := strconv.ParseInt(env, 10, 64)
+		if err != nil {
+			t.Fatalf("invalid ZKPOR_CONSTRAINT_BUDGET %q: %v", env, err)
+		}
+		budget = parsed
+	}
+
+	// number of users to probe per tier (1..probeMax). probeMax >= 2 is
+	// required to fit a line; >= 3 lets us sanity-check linearity.
+	probeMax := 4
+	if env := os.Getenv("ZKPOR_PROBE_MAX"); env != "" {
+		parsed, err := strconv.Atoi(env)
+		if err != nil || parsed < 2 {
+			t.Fatalf("invalid ZKPOR_PROBE_MAX %q (must be integer >= 2): %v", env, err)
+		}
+		probeMax = parsed
+	}
+
+	type tierResult struct {
+		tier        int
+		counts      []int // constraints for n = 1..probeMax users
+		base        int   // constraints not scaling with users
+		perUser     int   // constraints added per user (average slope)
+		maxDelta    int   // largest deviation of a single-step delta from perUser
+		capacity    int64 // floor((budget - base) / perUser)
+		linearityOK bool
+	}
+
+	results := make([]tierResult, 0, len(utils.AssetCountsTiers))
+
+	for _, tier := range utils.AssetCountsTiers {
+		counts := make([]int, 0, probeMax)
+		for n := 1; n <= probeMax; n++ {
+			c, err := compileConstraintsForBatch(tier, n)
+			if err != nil {
+				t.Fatalf("compile failed for tier=%d users=%d: %v", tier, n, err)
+			}
+			fmt.Printf("[tier=%d] users=%d constraints=%d\n", tier, n, c)
+			counts = append(counts, c)
+		}
+
+		// perUser is the constraint delta between consecutive user counts.
+		// With a perfectly affine circuit all deltas are identical, but gnark
+		// compilation introduces a few constraints of jitter, so we take the
+		// average slope over the whole probe range (counts[last]-counts[0])/(n-1)
+		// as the estimate — this averages out the per-step noise.
+		deltas := make([]int, 0, probeMax-1)
+		for i := 1; i < len(counts); i++ {
+			deltas = append(deltas, counts[i]-counts[i-1])
+		}
+		perUser := (counts[len(counts)-1] - counts[0]) / (len(counts) - 1)
+
+		// Record the largest deviation of any single-step delta from the
+		// average slope, as a linearity sanity check.
+		maxDelta := 0
+		for _, d := range deltas {
+			diff := d - perUser
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > maxDelta {
+				maxDelta = diff
+			}
+		}
+
+		// base = constraints(n) - perUser*n, using n=1 measurement.
+		base := counts[0] - perUser
+
+		var capacity int64
+		if perUser > 0 {
+			capacity = (budget - int64(base)) / int64(perUser)
+			if capacity < 0 {
+				capacity = 0
+			}
+		}
+
+		// Treat growth as linear if the worst single-step deviation is tiny
+		// relative to the per-user slope (< 1%). Anything larger suggests the
+		// affine model does not hold and the estimate should not be trusted.
+		linearityOK := perUser > 0 && maxDelta*100 < perUser
+
+		results = append(results, tierResult{
+			tier:        tier,
+			counts:      counts,
+			base:        base,
+			perUser:     perUser,
+			maxDelta:    maxDelta,
+			capacity:    capacity,
+			linearityOK: linearityOK,
+		})
+	}
+
+	// summary report
+	fmt.Println()
+	fmt.Println("================ user capacity per asset tier ================")
+	fmt.Printf("constraint budget            : %d (2^%.0f)\n", budget, logBase2(budget))
+	fmt.Printf("users probed per tier        : 1..%d\n", probeMax)
+	fmt.Println("-------------------------------------------------------------")
+	for _, r := range results {
+		fmt.Printf("asset tier                   : %d\n", r.tier)
+		fmt.Printf("  measured constraints (n=1..%d): %v\n", probeMax, r.counts)
+		fmt.Printf("  base constraints (fixed)     : %d\n", r.base)
+		fmt.Printf("  per-user constraints         : %d\n", r.perUser)
+		if r.linearityOK {
+			fmt.Printf("  linearity check              : OK (max step deviation = %d, within noise)\n", r.maxDelta)
+		} else {
+			fmt.Printf("  linearity check              : WARN max step deviation = %d vs per-user %d (growth not affine, estimate unreliable)\n", r.maxDelta, r.perUser)
+		}
+		fmt.Printf("  => max users per batch       : %d\n", r.capacity)
+		fmt.Printf("     (uses %d constraints, budget %d)\n", int64(r.base)+r.capacity*int64(r.perUser), budget)
+		fmt.Println("-------------------------------------------------------------")
+	}
+}
+
+// logBase2 returns log2(x) for reporting; x is expected to be a positive power
+// of two but any positive value works for display purposes.
+func logBase2(x int64) float64 {
+	l := 0.0
+	for x > 1 {
+		x >>= 1
+		l++
+	}
+	return l
 }
 
 func TestBatchCreateUserCircuitFromKeySetup(t *testing.T) {
