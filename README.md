@@ -7,18 +7,49 @@ See the [technical blog](./docs/updated_proof_of_solvency_to_mitigate_dummy_user
 
 #### Constraint Count
 
+The base and per-user constraint counts depend on `AssetCounts` (the total
+number of asset types the circuit tracks, defined in `src/utils/constants.go`),
+because the base cost and each user's per-asset bookkeeping both scale with it.
+The numbers below can be reproduced with the `TestEstimateUserCapacityPerTier`
+test in `circuit/batch_create_user_circuit_test.go`, which compiles the circuit
+for 1..4 users per batch and linearly fits `constraints(n) = base + perUser·n`.
+
+##### When `AssetCounts = 500`
+
 | Component | Constraints |
 |-----------|------------|
 | Base (shared across all users in a batch) | ~6,630,000 |
 | Per user — 50-asset tier | ~42,300 |
 | Per user — 500-asset tier | ~281,200 |
 
+##### When `AssetCounts = 700`
+
+| Component | Constraints |
+|-----------|------------|
+| Base (shared across all users in a batch) | ~9,252,280 |
+| Per user — 50-asset tier | ~45,293 |
+| Per user — 500-asset tier | ~284,098 |
+| Per user — 700-asset tier | ~390,160 |
+
 #### How `BatchCreateUserOpsCountsTiers` Is Determined
 
 The maximum constraint count supported by the underlying ZK algorithm (Groth16 over BN254 via gnark) is 2^28. We target 2^26 constraints per batch to leave a safety margin. The per-tier batch sizes are derived as follows:
 
+##### When `AssetCounts = 500`
+
 - **500-asset tier**: (2^26 − 6,630,000) / 281,200 ≈ 215 → rounded down to **200**
 - **50-asset tier**: (2^26 − 6,575,000) / 42,300 ≈ 1430 → rounded down to **1380**
+
+##### When `AssetCounts = 700`
+
+Raising `AssetCounts` to 700 increases the fixed base cost to ~9,252,280 and adds a third tier for users holding 501–700 asset types. The theoretical maximum users per batch (from `TestEstimateUserCapacityPerTier` under a 2^26 budget) and the configured `BatchCreateUserOpsCountsTiers` values are:
+
+- **700-asset tier**: (2^26 − 9,252,280) / 390,160 ≈ 148 → rounded down to **128**
+- **500-asset tier**: (2^26 − 9,252,280) / 284,098 ≈ 203 → rounded down to **192**
+- **50-asset tier**: (2^26 − 9,252,280) / 45,293 ≈ 1277 → rounded down to **1216**
+
+These are the values currently set in `BatchCreateUserOpsCountsTiers` (`700: 128, 500: 192, 50: 1216`). The rounded-down batch sizes leave extra headroom below the theoretical maximum.
+
 
 ## How to run
 

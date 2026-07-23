@@ -14,7 +14,11 @@ set -euo pipefail
 # --- Configuration ---
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK_DIR="${PROJECT_ROOT}/_integration_test"
-TEST_TIERS="500:30,50:220"
+# The 700 tier is intentionally EMPTY: the sample data has at most 399 non-empty
+# assets per user, so no user ever buckets into the 700 tier. Its presence here
+# tests that a configured-but-unused tier is skipped end-to-end. Because no user
+# reaches it, adding it must NOT change proof/userproof row counts (see Step 7.5).
+TEST_TIERS="700:2,500:30,50:220"
 EXPECT_TOTAL_USERS_ACCOUNT=10240
 EXPECT_TOTAL_PROOFS=50
 MYSQL_PORT=13306
@@ -31,6 +35,7 @@ witness_done_marker=/tmp/witness_done
 
 # Keygen file names derived from TEST_TIERS
 KEYGEN_FILES=(
+    "zkpor700_2.pk" "zkpor700_2.vk" "zkpor700_2.r1cs"
     "zkpor500_30.pk" "zkpor500_30.vk" "zkpor500_30.r1cs"
     "zkpor50_220.pk" "zkpor50_220.vk" "zkpor50_220.r1cs"
 )
@@ -206,8 +211,8 @@ write_config "$(cat <<EOF
         "Host": "127.0.0.1:${REDIS_PORT}",
         "Password": ""
     },
-    "ZkKeyName": ["zkpor50_220", "zkpor500_30"],
-    "AssetsCountTiers": [50, 500]
+    "ZkKeyName": ["zkpor50_220", "zkpor500_30", "zkpor700_2"],
+    "AssetsCountTiers": [50, 500, 700]
 }
 EOF
 )"
@@ -274,8 +279,8 @@ cd "$PROJECT_ROOT"
 cat > "${WORK_DIR}/config/config.json" <<EOF
 {
     "ProofTable": "config/proof.csv",
-    "ZkKeyName": ["zkpor50_220", "zkpor500_30"],
-    "AssetsCountTiers": [50, 500],
+    "ZkKeyName": ["zkpor50_220", "zkpor500_30", "zkpor700_2"],
+    "AssetsCountTiers": [50, 500, 700],
     "CexAssetsInfo": ${CEX_ASSETS_JSON}
 }
 EOF

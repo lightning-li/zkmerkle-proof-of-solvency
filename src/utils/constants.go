@@ -16,7 +16,7 @@ import (
 const (
 	// BatchCreateUserOpsCounts = 864
 	AccountTreeDepth         = 28
-	AssetCounts              = 500
+	AssetCounts              = 700
 	// TierCount: must be even number, the cex assets commitment will depend on the TierCount/2 parts
 	TierCount				 = 12
 	R1csBatchSize            = 1000000
@@ -101,8 +101,9 @@ var (
 	// the key is the number of assets user own
 	// the value is the number of batch create user ops
 	BatchCreateUserOpsCountsTiers = map[int]int {
-		500: 200,
-		50: 1380,
+		700: 128,
+		500: 192,
+		50: 1216,
 	}
 	AssetCountsTiers = make([]int, 0)
 
