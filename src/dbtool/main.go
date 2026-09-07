@@ -14,6 +14,7 @@ import (
 	"github.com/binance/zkmerkle-proof-of-solvency/src/prover/prover"
 	"github.com/binance/zkmerkle-proof-of-solvency/src/utils"
 	"github.com/binance/zkmerkle-proof-of-solvency/src/witness/witness"
+	sqlmysql "github.com/go-sql-driver/mysql"
 	"github.com/gocarina/gocsv"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
@@ -38,6 +39,7 @@ func main() {
 	queryCexAssetsConfig := flag.Bool("query_cex_assets", false, "query cex assets info")
 	queryWitnessData := flag.Int("query_witness_data", -1, "query witness data by height")
 	queryAccountData := flag.Int("query_account_data", -1, "query account data by index")
+	createUserProofIndex := flag.Bool("create_userproof_index", false, "create user proof table index")
 	pushTaskToRedis := flag.Bool("push_task_to_redis", false, "push task to redis")
 	exportProofCSV := flag.String("export_proof_csv", "", "export proof table to csv file")
 
@@ -91,8 +93,8 @@ func main() {
 
 		// clear redis data
 		client := redis.NewClient(&redis.Options{
-			Addr:            dbtoolConfig.Redis.Host,
-			Password:        dbtoolConfig.Redis.Password,
+			Addr:     dbtoolConfig.Redis.Host,
+			Password: dbtoolConfig.Redis.Password,
 		})
 		client.FlushAll(context.Background())
 		fmt.Println("redis data drop successfully")
@@ -203,6 +205,34 @@ func main() {
 		fmt.Println(u.Config)
 	}
 
+	if *createUserProofIndex {
+		customeLogger := logger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
+			logger.Config{
+				SlowThreshold:             60 * time.Second, // Slow SQL threshold
+				LogLevel:                  logger.Info,      // Log level
+				IgnoreRecordNotFoundError: true,             // Ignore ErrRecordNotFound error for logger
+				Colorful:                  false,            // Disable color
+			},
+		)
+		sqlmysql.SetLogger(log.New(os.Stdout, "[mysql] ", log.LstdFlags))
+		db, err := gorm.Open(mysql.Open(dbtoolConfig.MysqlDataSource), &gorm.Config{
+			Logger: customeLogger,
+		})
+		if err != nil {
+			panic(err.Error())
+		}
+		userProofModel := witness.NewUserProofModel(db, dbtoolConfig.DbSuffix)
+		indexStart := time.Now()
+
+		fmt.Printf("begin to create account id index, may takes a while...\n")
+		if err := userProofModel.CreateAccountIdIndex(); err != nil {
+			fmt.Println("create user proof table index failed")
+			panic(err.Error())
+		}
+		fmt.Printf("create user proof table index successfully, took %v\n", time.Since(indexStart))
+	}
+
 	if *pushTaskToRedis {
 		db, err := gorm.Open(mysql.Open(dbtoolConfig.MysqlDataSource), &gorm.Config{
 			Logger: newLogger,
@@ -217,7 +247,7 @@ func main() {
 		taskQueueName := "por_batch_task_queue_" + dbtoolConfig.DbSuffix
 		ctx := context.Background()
 		redisCli := redis.NewClient(&redis.Options{
-			Addr: dbtoolConfig.Redis.Host,
+			Addr:     dbtoolConfig.Redis.Host,
 			Password: dbtoolConfig.Redis.Password,
 		})
 		for _, status := range witessStatusList {

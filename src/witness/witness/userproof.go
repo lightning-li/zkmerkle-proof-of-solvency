@@ -18,18 +18,18 @@ import (
 // and writes them to MySQL. It adapts the standalone userproof service
 // (Mode 2 logic) to run within the witness package.
 type UserProofService struct {
-	accountTree           *merkletree.FixedDepthMerkleTree
-	accounts              map[int][]utils.AccountInfo
-	userProofModel        UserProofModel
+	accountTree    *merkletree.FixedDepthMerkleTree
+	accounts       map[int][]utils.AccountInfo
+	userProofModel UserProofModel
 }
 
 // NewUserProofService creates a new UserProofService.
 func NewUserProofService(accountTree *merkletree.FixedDepthMerkleTree,
 	accounts map[int][]utils.AccountInfo, db *gorm.DB, dbSuffix string) *UserProofService {
 	return &UserProofService{
-		accountTree:           accountTree,
-		accounts:              accounts,
-		userProofModel:        NewUserProofModel(db, dbSuffix),
+		accountTree:    accountTree,
+		accounts:       accounts,
+		userProofModel: NewUserProofModel(db, dbSuffix),
 	}
 }
 
@@ -160,16 +160,6 @@ func (s *UserProofService) Run() {
 		fmt.Println("The mismatched counts: ", currentAccountCounts, totalAccountCounts, totalWritten)
 		panic("mismatch totalAccountCounts and totalWritten")
 	}
-
-	// Build the account_id index after all rows are written.
-	// A post-insert ALTER TABLE uses sort + bulk-load which is orders of
-	// magnitude faster than maintaining the B-tree during 100M+ random inserts.
-	fmt.Println("creating account_id index (this may take a while)...")
-	indexStart := time.Now()
-	if err := s.userProofModel.CreateAccountIdIndex(); err != nil {
-		panic("create account_id index failed: " + err.Error())
-	}
-	fmt.Printf("account_id index created, took %v\n", time.Since(indexStart))
 
 	fmt.Println("userproof service run finished...")
 }

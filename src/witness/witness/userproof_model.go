@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"math/big"
 
+	"context"
 	"github.com/binance/zkmerkle-proof-of-solvency/src/utils"
 	"gorm.io/gorm"
+	"time"
 )
 
 const UserProofTableNamePrefix = "userproof"
+
+// AccountIdIndexName is the name of the non-unique index on account_id.
+const AccountIdIndexName = "idx_str"
 
 type (
 	UserProofModel interface {
@@ -33,14 +38,9 @@ type (
 	}
 
 	// UserProof stores a per-user Merkle inclusion proof.
-	// account_id has no unique index because the table holds ~100M rows and
-	// maintaining a unique B-tree on random hash strings causes severe random
-	// I/O once the index exceeds the InnoDB buffer pool, degrading bulk-insert
-	// throughput. The index is created after all rows are written instead
-	// (see UserProofModel.CreateAccountIdIndex).
 	UserProof struct {
-		AccountIndex    uint32 `gorm:"index:idx_int,unique"`
-		AccountId       string `gorm:"type:varchar(64)"`
+		AccountIndex    uint32 `gorm:"primaryKey;autoIncrement:false"`
+		AccountId       string `gorm:"type:varchar(64);index:idx_str,unique"`
 		AccountLeafHash string
 		TotalEquity     string
 		TotalDebt       string
@@ -82,8 +82,13 @@ func (m *defaultUserProofModel) DropUserProofTable() error {
 }
 
 func (m *defaultUserProofModel) CreateAccountIdIndex() error {
-	sql := fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `idx_str` (`account_id`)", m.table)
-	return m.DB.Exec(sql).Error
+	if m.DB.Migrator().HasIndex(m.table, AccountIdIndexName) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
+	defer cancel()
+	sql := fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (`account_id`)", m.table, AccountIdIndexName)
+	return m.DB.WithContext(ctx).Exec(sql).Error
 }
 
 func (m *defaultUserProofModel) CreateUserProofs(rows []UserProof) error {
